@@ -1,0 +1,336 @@
+const std = @import("std");
+const c = @cImport({
+    @cInclude("libavformat/avformat.h");
+    @cInclude("libavcodec/avcodec.h");
+    @cInclude("libavutil/avutil.h");
+    @cInclude("libswscale/swscale.h");
+});
+
+const ffmpeg_err = error{
+    CannotFoundBestStream,
+    CannotFoundCodec,
+    CannotAllocateCodecContext,
+    GetSwsContextFailed,
+    AllocateFrameFailed,
+};
+
+const VideoInfo = struct {
+    frame_count: usize,
+    frame_index: usize,
+    duration: u64,
+    width: u32,
+    height: u32,
+    fps: f64,
+    fmt: c.AVPixelFormat,
+
+    // zig fmt: off
+    pub fn format(
+        self: @This(),
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        try writer.print(
+            "VideoInfo {{ frame_count: {d}, duration: {d}, width: {d}, height: {d}, fps: {d} }}",
+            .{ self.frame_count, self.duration, self.width, self.height, self.fps }
+        );
+    }
+};
+
+fn error_handle(code: c_int) !void {
+    if (code == 0)
+        return;
+    var buffer: [1024]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&buffer);
+    const stderr = &stderr_writer.interface;
+    try stderr.print("{s}\n", .{av_err2str(code)});
+    try stderr.flush();
+    std.process.exit(1);
+}
+
+fn get_video_info(path: []const u8) !VideoInfo {
+    const alloc = std.heap.page_allocator;
+
+    _ = c.avformat_network_init();
+    defer _ = c.avformat_network_deinit();
+
+    const c_path = try alloc.alloc(u8, path.len + 1);
+    defer alloc.free(c_path);
+
+    std.mem.copyForwards(u8, c_path[0..path.len], path);
+    c_path[path.len] = 0;
+
+    const c_path_ptr: [*c]const u8 = @ptrCast(c_path.ptr);
+
+    var context: ?*c.AVFormatContext = null;
+
+    // zig fmt: off
+    try error_handle(
+        c.avformat_open_input(
+            &context,
+            c_path_ptr,
+            null,
+            null
+        )
+    );
+    defer c.avformat_close_input(&context);
+
+    try error_handle(c.avformat_find_stream_info(context, null));
+
+    const index: usize = @intCast(c.av_find_best_stream(context, c.AVMEDIA_TYPE_VIDEO, -1, -1, null, 0));
+    if (index < 0)
+        return ffmpeg_err.CannotFoundBestStream;
+
+    const stream = context.?.streams[index];
+    const codec_params = stream.*.codecpar;
+
+    const codec = c.avcodec_find_decoder(codec_params.*.codec_id);
+    if (codec == null)
+        return ffmpeg_err.CannotFoundCodec;
+
+    const codec_context = c.avcodec_alloc_context3(codec);
+    if (codec_context == null)
+        return ffmpeg_err.CannotAllocateCodecContext;
+
+    try error_handle(c.avcodec_parameters_to_context(codec_context, codec_params));
+
+    const num: f64 = @floatFromInt(stream.*.avg_frame_rate.num);
+    const den: f64 = @floatFromInt(stream.*.avg_frame_rate.den);
+
+    return VideoInfo {
+        .frame_count = @intCast(stream.*.nb_frames),
+        .duration = @intCast(stream.*.duration),
+        .width = @intCast(codec_params.*.width),
+        .height = @intCast(codec_params.*.height),
+        .fps = @divFloor(num, den),
+        .frame_index = index,
+        .fmt = codec_context.*.pix_fmt
+    };
+}
+
+const VideoFrame = struct {
+    frame: [*c]c.AVFrame,
+
+    pub fn init(frame: *c.AVFrame) VideoFrame {
+        return VideoFrame {
+            .frame = frame
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        c.av_frame_free(&self.frame);
+    }
+};
+
+const VideoReadFrameError = error {
+    EOF,
+};
+
+const VideoReader = struct {
+
+    fmt_ctx: ?*c.AVFormatContext = null,
+    codec_ctx: ?*c.AVCodecContext = null,
+    info: VideoInfo,
+
+
+    pub fn init(path: []const u8) !VideoReader {
+        const info = try get_video_info(path);
+        const alloc = std.heap.page_allocator;
+        _ = c.avformat_network_init();
+
+        const c_path = try alloc.alloc(u8, path.len + 1);
+        defer alloc.free(c_path);
+
+        std.mem.copyForwards(u8, c_path[0..path.len], path);
+        c_path[path.len] = 0;
+
+        const c_path_ptr: [*c]const u8 = @ptrCast(c_path.ptr);
+
+        var context: ?*c.AVFormatContext = null;
+
+        // zig fmt: off
+        try error_handle(
+            c.avformat_open_input(
+                &context,
+                c_path_ptr,
+                null,
+                null
+            )
+        );
+
+        try error_handle(c.avformat_find_stream_info(context, null));
+
+        const index = info.frame_index;
+        const codec_par = context.?.streams[index].*.codecpar;
+        const codec = c.avcodec_find_decoder(codec_par.*.codec_id);
+
+        if (codec == null)
+            return error.CannotFoundCodec;
+
+        const codec_context = c.avcodec_alloc_context3(codec);
+        try error_handle(c.avcodec_parameters_to_context(codec_context, codec_par));
+
+        try error_handle(c.avcodec_open2(codec_context, codec, null));
+
+        return VideoReader {
+            .fmt_ctx = context,
+            .codec_ctx = codec_context,
+            .info = info,
+        };
+    }
+
+    pub fn read_frame(self: @This()) VideoReadFrameError!VideoFrame {
+        const index  = self.info.frame_index;
+        const pkt = c.av_packet_alloc();
+        const frame = c.av_frame_alloc();
+
+        while (c.av_read_frame(self.fmt_ctx, pkt) >= 0) {
+            if (pkt.*.stream_index == index) {
+                if (c.avcodec_send_packet(self.codec_ctx, pkt) < 0) continue;
+                if (c.avcodec_receive_frame(self.codec_ctx, frame) == 0)
+                    return VideoFrame.init(frame);
+            }
+        }
+        return VideoReadFrameError.EOF;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        c.avformat_close_input(&self.fmt_ctx);
+        _ = c.avformat_network_deinit();
+    }
+};
+
+pub fn av_err2str(errenum: c_int) []const u8 {
+    var buf: [128]u8 = undefined;
+    if (c.av_strerror(errenum, &buf, buf.len) != 0)
+        return "Unknown error";
+    return std.mem.sliceTo(&buf, 0);
+}
+
+const ToImage = struct {
+    format: c_int,
+    codec: [*c]const c.AVCodec,
+    codec_ctx: [*c] c.AVCodecContext,
+    sws_ctx: ?*c.SwsContext,
+
+    pub fn init(width: c_int, height: c_int, src_format: c.AVPixelFormat, args: struct {
+        encoder: c_int = c.AV_CODEC_ID_MJPEG,
+        format: c_int = c.AV_PIX_FMT_YUVJ420P,
+    }) !ToImage {
+        const codec = c.avcodec_find_encoder(args.encoder);
+        if (codec == null)
+            return ffmpeg_err.CannotFoundCodec;
+
+        var codec_ctx = c.avcodec_alloc_context3(codec);
+        errdefer c.avcodec_free_context(&codec_ctx);
+
+        if (codec_ctx == null)
+            return ffmpeg_err.CannotAllocateCodecContext;
+
+        codec_ctx.*.width = width;
+        codec_ctx.*.height = height;
+        codec_ctx.*.pix_fmt = args.format;
+        codec_ctx.*.time_base = .{.num = 1, .den = 25};
+
+        try error_handle(c.avcodec_open2(codec_ctx, codec, null));
+
+        const sws_ctx = c.sws_getContext(
+            width,
+            height,
+            src_format,
+            width,
+            height,
+            args.format,
+            c.SWS_BILINEAR,
+            null,
+            null,
+            null
+        );
+        errdefer c.sws_freeContext(sws_ctx);
+
+        if (sws_ctx == null)
+            return ffmpeg_err.GetSwsContextFailed;
+
+        return ToImage {
+            .codec = codec,
+            .format = args.format,
+            .codec_ctx = codec_ctx,
+            .sws_ctx = sws_ctx
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        c.avcodec_free_context(&self.codec_ctx);
+        c.sws_freeContext(self.sws_ctx);
+    }
+
+
+    pub fn save(self: @This(), frame: [*c]c.AVFrame, filename: []const u8) !void {
+        const width = frame.*.width;
+        const height = frame.*.height;
+
+
+        var rgb_frame = c.av_frame_alloc();
+        defer c.av_frame_free(&rgb_frame);
+
+        if (rgb_frame == null)
+            return error.AllocateFrameFailed;
+
+        rgb_frame.*.format = self.format;
+        rgb_frame.*.width = width;
+        rgb_frame.*.height = height;
+
+        try error_handle(c.av_frame_get_buffer(rgb_frame, 0));
+
+        _ = c.sws_scale(self.sws_ctx, &frame.*.data, &frame.*.linesize, 0, height, &rgb_frame.*.data,& rgb_frame.*.linesize);
+
+        var pkt = c.av_packet_alloc();
+        defer c.av_packet_free(&pkt);
+
+        var ret = c.avcodec_send_frame(self.codec_ctx, rgb_frame);
+        if (ret >= 0) {
+            ret = c.avcodec_receive_packet(self.codec_ctx, pkt);
+            if (ret >= 0) {
+                var file = try std.fs.cwd().createFile(filename, .{});
+                defer file.close();
+                const size: usize = @intCast(pkt.*.size);
+                try file.writeAll(pkt.*.data[0..size]);
+                c.av_packet_unref(pkt);
+            }
+        }
+    }
+};
+
+
+
+pub fn main() !void {
+    const alloc = std.heap.page_allocator;
+    const args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
+    if (args.len == 1) {
+        try std.fs.File.stderr().writeAll("Not give file path!\n");
+        std.process.exit(1);
+    }
+    const path = args[1];
+    var buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+    const stdout = &stdout_writer.interface;
+    const info = try get_video_info(path);
+    try stdout.print("info: {f}\n", .{info});
+    try stdout.flush();
+    var reader = try VideoReader.init(path);
+    defer reader.deinit();
+    var saver = try ToImage.init(@bitCast(info.width), @bitCast(info.height), info.fmt, .{});
+    defer saver.deinit();
+
+    for (0..500)|i| {
+        var frame = try reader.read_frame();
+        defer frame.deinit();
+
+        const name = try std.fmt.allocPrint(alloc, "frame-{d}.jpg", .{i});
+        defer alloc.free(name);
+
+        try stdout.print("Save: {s}\n", .{name});
+        try stdout.flush();
+
+        try saver.save(frame.frame, name);
+    }
+}
