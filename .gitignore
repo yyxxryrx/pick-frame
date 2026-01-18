@@ -1,6 +1,11 @@
 /.vscode
 /.zed
 /.idea
+/lib/arg/.zed
+/lib/arg/.idea
+/lib/arg/.vscode
 
 /.zig-cache
 /zig-out
+/lib/arg/target
+/lib/arg/include

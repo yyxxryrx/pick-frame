@@ -26,6 +26,15 @@ pub fn build(b: *std.Build) void {
     // target and optimize options) will be listed when running `zig build --help`
     // in this directory.
 
+    const cargo_build = b.addSystemCommand(switch (b.release_mode) {
+        .off => &. {
+            "cargo", "build"
+        },
+        else => &.{
+            "cargo", "build", "--release"
+        }
+    });
+    cargo_build.setCwd(b.path("lib/arg/"));
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -58,6 +67,20 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.is_linking_libc = true;
+    exe.bundle_ubsan_rt = false;
+    exe.bundle_compiler_rt = false;
+
+    const target_name = switch (b.release_mode) {
+        .off => "debug",
+        else => "release"
+    };
+
+    exe.root_module.addIncludePath(b.path("lib/arg/include"));
+    exe.root_module.addLibraryPath(b.path(b.pathJoin(&.{"lib/arg/target", target_name})));
+
+    exe.root_module.linkSystemLibrary("arg", .{.preferred_link_mode = .static});
+
     const vcpkg_root = std.process.getEnvVarOwned(b.allocator, "VCPKG_ROOT") catch {
         // 如果读取失败（没设置这个变量），我们打印一个友好的错误提示并退出
         std.debug.print("Error: environment variable 'VCPKG_ROOT' is not set.\n", .{});
@@ -70,10 +93,8 @@ pub fn build(b: *std.Build) void {
     const vcpkg_include = b.pathJoin(&.{ vcpkg_root, "installed", triplet, "include" });
     const vcpkg_lib = b.pathJoin(&.{ vcpkg_root, "installed", triplet, "lib" });
 
-    exe.is_linking_libc = true;
-
-    exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = vcpkg_include });
-    exe.addLibraryPath(std.Build.LazyPath{ .cwd_relative = vcpkg_lib });
+    exe.root_module.addIncludePath(std.Build.LazyPath{ .cwd_relative = vcpkg_include });
+    exe.root_module.addLibraryPath(std.Build.LazyPath{ .cwd_relative = vcpkg_lib });
 
     exe.root_module.linkSystemLibrary("avdevice", .{.preferred_link_mode = .static});
     exe.root_module.linkSystemLibrary("avformat", .{.preferred_link_mode = .static});
@@ -100,10 +121,14 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("mfplat", .{});  // Media Foundation (如果是完整版 ffmpeg 可能需要)
     exe.root_module.linkSystemLibrary("mfuuid", .{});
     exe.root_module.linkSystemLibrary("strmiids", .{});
+    exe.root_module.linkSystemLibrary("userenv", .{});
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
+
+    exe.step.dependOn(&cargo_build.step);
+
     b.installArtifact(exe);
 
     // This creates a top level step. Top level steps have a name and can be
