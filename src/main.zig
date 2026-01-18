@@ -6,12 +6,20 @@ const c = @cImport({
     @cInclude("libswscale/swscale.h");
 });
 
+const arg = @cImport({
+    @cInclude("arg.h");
+});
+
 const ffmpeg_err = error{
     CannotFoundBestStream,
     CannotFoundCodec,
     CannotAllocateCodecContext,
     GetSwsContextFailed,
     AllocateFrameFailed,
+};
+
+const cli_err = error{
+    CannotFoundFile,
 };
 
 const VideoInfo = struct {
@@ -22,6 +30,8 @@ const VideoInfo = struct {
     height: u32,
     fps: f64,
     fmt: c.AVPixelFormat,
+    time_base: c.AVRational,
+    start_time: i64,
 
     // zig fmt: off
     pub fn format(
@@ -100,9 +110,11 @@ fn get_video_info(path: []const u8) !VideoInfo {
         .duration = @intCast(stream.*.duration),
         .width = @intCast(codec_params.*.width),
         .height = @intCast(codec_params.*.height),
-        .fps = @divFloor(num, den),
+        .fps = num / den,
         .frame_index = index,
-        .fmt = codec_context.*.pix_fmt
+        .fmt = codec_context.*.pix_fmt,
+        .time_base = stream.*.time_base,
+        .start_time = stream.*.start_time,
     };
 }
 
@@ -131,8 +143,9 @@ const VideoReader = struct {
     info: VideoInfo,
 
 
-    pub fn init(path: []const u8) !VideoReader {
-        const info = try get_video_info(path);
+    pub fn init(path: []const u8, video_info: ?VideoInfo) !VideoReader {
+        const info = video_info orelse try get_video_info(path);
+
         const alloc = std.heap.page_allocator;
         _ = c.avformat_network_init();
 
@@ -190,6 +203,41 @@ const VideoReader = struct {
             }
         }
         return VideoReadFrameError.EOF;
+    }
+    
+    pub fn seek(self: @This(), frame_index: u64) !void {
+        const time_base = self.info.time_base;
+
+        // 1. 计算相对秒数
+        const seconds = @as(f64, @floatFromInt(frame_index)) / self.info.fps;
+
+        // 2. 将秒数转换为流的时间基单位 (PTS)
+        // 公式：seconds / av_q2d(time_base)
+        const tb_val = @as(f64, @floatFromInt(time_base.num)) / @as(f64, @floatFromInt(time_base.den));
+        var target_ts: i64 = @intFromFloat(seconds / tb_val);
+
+        // =======================================================
+        // 【关键修复】加上流的起始时间 (start_time)
+        // 很多视频不是从 0 开始的，如果不加这个，Seek 就会跳回开头
+        // =======================================================
+        if (self.info.start_time != c.AV_NOPTS_VALUE) {
+            target_ts += self.info.start_time;
+        }
+        std.debug.print("Seek: Frame={d} -> Target PTS={d} (Start PTS={d})\n",
+            .{frame_index, target_ts, self.info.start_time});
+        // zig fmt: off
+        try error_handle(
+            c.avformat_seek_file(
+                self.fmt_ctx,
+                @intCast(self.info.frame_index),
+                std.math.minInt(i64),
+                target_ts,
+                std.math.maxInt(i64),
+                c.AVSEEK_FLAG_BACKWARD
+            )
+        );
+
+        c.avcodec_flush_buffers(self.codec_ctx);
     }
 
     pub fn deinit(self: *@This()) void {
@@ -302,26 +350,37 @@ const ToImage = struct {
 
 
 pub fn main() !void {
+    const args = arg.parse();
+    defer arg.free_parse(args);
+
+    try run(args);
+}
+
+
+fn run(args: [*c]arg.ArgParseResult) !void {
     const alloc = std.heap.page_allocator;
-    const args = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, args);
-    if (args.len == 1) {
-        try std.fs.File.stderr().writeAll("Not give file path!\n");
-        std.process.exit(1);
-    }
-    const path = args[1];
     var buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&buffer);
     const stdout = &stdout_writer.interface;
-    const info = try get_video_info(path);
+
+    try stdout.print("input: {s}, output: {s}", .{args.*.input, args.*.output});
+    try stdout.flush();
+
+    const input: []const u8 = std.mem.sliceTo(args.*.input, 0);
+
+    std.fs.cwd().access(input, .{}) catch return;
+
+    const info = try get_video_info(input);
     try stdout.print("info: {f}\n", .{info});
     try stdout.flush();
-    var reader = try VideoReader.init(path);
+    var reader = try VideoReader.init(input, info);
     defer reader.deinit();
     var saver = try ToImage.init(@bitCast(info.width), @bitCast(info.height), info.fmt, .{});
     defer saver.deinit();
 
-    for (0..500)|i| {
+    try reader.seek(600);
+
+    for (100..114)|i| {
         var frame = try reader.read_frame();
         defer frame.deinit();
 
