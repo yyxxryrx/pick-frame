@@ -18,9 +18,7 @@ const ffmpeg_err = error{
     AllocateFrameFailed,
 };
 
-const cli_err = error{
-    CannotFoundFile,
-};
+const cli_err = error{ CannotFoundFile, InvalidRange };
 
 const VideoInfo = struct {
     frame_count: usize,
@@ -118,6 +116,59 @@ fn get_video_info(path: []const u8) !VideoInfo {
     };
 }
 
+fn frame_to_timestamp(frame_index: u64, info: *const VideoInfo) i64 {
+    const fps = info.fps;
+    const time_base = info.time_base;
+    const start_time = info.start_time;
+    // 1. 计算相对秒数
+    const seconds = @as(f64, @floatFromInt(frame_index)) / fps;
+
+    // 2. 将秒数转换为流的时间基单位 (PTS)
+    // 公式：seconds / av_q2d(time_base)
+    const tb_val = @as(f64, @floatFromInt(time_base.num)) / @as(f64, @floatFromInt(time_base.den));
+    var target_ts: i64 = @intFromFloat(seconds / tb_val);
+
+    // =======================================================
+    // 【关键修复】加上流的起始时间 (start_time)
+    // 很多视频不是从 0 开始的，如果不加这个，Seek 就会跳回开头
+    // =======================================================
+    if (start_time != c.AV_NOPTS_VALUE) {
+        target_ts += start_time;
+    }
+    return target_ts;
+}
+
+fn milliseconds_to_timestamp(ms: u64, info: *const VideoInfo) i64 {
+    const time_base = info.time_base;
+    const start_time = info.start_time;
+    const seconds = @as(f64, @floatFromInt(ms)) / 1000.0;
+    const tb_val = @as(f64, @floatFromInt(time_base.num)) / @as(f64, @floatFromInt(time_base.den));
+    var target_ts: i64 = @intFromFloat(seconds / tb_val);
+    if (start_time != c.AV_NOPTS_VALUE) {
+        target_ts += start_time;
+    }
+    return target_ts;
+}
+
+fn timestamp_to_frame(timestamp: i64, info: *const VideoInfo) u64 {
+    const fps = info.fps;
+    const time_base = info.time_base;
+    const start_time = info.start_time;
+    var ts = timestamp;
+    if (start_time != c.AV_NOPTS_VALUE) {
+        ts -= start_time;
+    }
+    return @as(
+        u64, 
+        @intFromFloat(
+            @divFloor(
+                @as(f64, @floatFromInt(ts)) * @as(f64, @floatFromInt(time_base.num)) * fps,
+                @as(f64, @floatFromInt(time_base.den))
+            )
+        )
+    );
+}
+
 const VideoFrame = struct {
     frame: [*c]c.AVFrame,
 
@@ -205,33 +256,14 @@ const VideoReader = struct {
         return VideoReadFrameError.EOF;
     }
     
-    pub fn seek(self: @This(), frame_index: u64) !void {
-        const time_base = self.info.time_base;
-
-        // 1. 计算相对秒数
-        const seconds = @as(f64, @floatFromInt(frame_index)) / self.info.fps;
-
-        // 2. 将秒数转换为流的时间基单位 (PTS)
-        // 公式：seconds / av_q2d(time_base)
-        const tb_val = @as(f64, @floatFromInt(time_base.num)) / @as(f64, @floatFromInt(time_base.den));
-        var target_ts: i64 = @intFromFloat(seconds / tb_val);
-
-        // =======================================================
-        // 【关键修复】加上流的起始时间 (start_time)
-        // 很多视频不是从 0 开始的，如果不加这个，Seek 就会跳回开头
-        // =======================================================
-        if (self.info.start_time != c.AV_NOPTS_VALUE) {
-            target_ts += self.info.start_time;
-        }
-        std.debug.print("Seek: Frame={d} -> Target PTS={d} (Start PTS={d})\n",
-            .{frame_index, target_ts, self.info.start_time});
+    pub fn seek(self: @This(), timestamp: i64) !void {
         // zig fmt: off
         try error_handle(
             c.avformat_seek_file(
                 self.fmt_ctx,
                 @intCast(self.info.frame_index),
                 std.math.minInt(i64),
-                target_ts,
+                timestamp,
                 std.math.maxInt(i64),
                 c.AVSEEK_FLAG_BACKWARD
             )
@@ -311,7 +343,7 @@ const ToImage = struct {
     }
 
 
-    pub fn save(self: @This(), frame: [*c]c.AVFrame, filename: []const u8) !void {
+    pub fn save(self: @This(), frame: [*c]c.AVFrame, dir: std.fs.Dir, filename: []const u8) !void {
         const width = frame.*.width;
         const height = frame.*.height;
 
@@ -337,7 +369,7 @@ const ToImage = struct {
         if (ret >= 0) {
             ret = c.avcodec_receive_packet(self.codec_ctx, pkt);
             if (ret >= 0) {
-                var file = try std.fs.cwd().createFile(filename, .{});
+                var file = try dir.createFile(filename, .{});
                 defer file.close();
                 const size: usize = @intCast(pkt.*.size);
                 try file.writeAll(pkt.*.data[0..size]);
@@ -367,29 +399,65 @@ fn run(args: [*c]arg.ArgParseResult) !void {
     try stdout.flush();
 
     const input: []const u8 = std.mem.sliceTo(args.*.input, 0);
+    const output: []const u8 = std.mem.sliceTo(args.*.output, 0);
 
-    std.fs.cwd().access(input, .{}) catch return;
+    std.fs.cwd().access(input, .{}) catch return cli_err.CannotFoundFile;
 
+    const out = try std.fs.cwd().makeOpenPath(output, .{});
     const info = try get_video_info(input);
     try stdout.print("info: {f}\n", .{info});
     try stdout.flush();
+
+    const from = switch (args.*.start.kind) {
+        arg.Frame => frame_to_timestamp(args.*.start.value, &info),
+        arg.Millisecond => milliseconds_to_timestamp(args.*.start.value, &info),
+        arg.End => std.math.maxInt(i64),
+        else => unreachable,
+    };
+
+    const to = switch (args.*.end.kind) {
+        arg.Frame => frame_to_timestamp(args.*.end.value, &info),
+        arg.Millisecond => milliseconds_to_timestamp(args.*.end.value, &info),
+        arg.End => std.math.maxInt(i64),
+        else => unreachable,
+    };
+
+    if (from > to)
+        return cli_err.InvalidRange;
+
+    std.debug.print("start: {d} end: {d}\n", .{from, to});
+
     var reader = try VideoReader.init(input, info);
     defer reader.deinit();
     var saver = try ToImage.init(@bitCast(info.width), @bitCast(info.height), info.fmt, .{});
     defer saver.deinit();
 
-    try reader.seek(600);
+    try reader.seek(from);
 
-    for (100..114)|i| {
-        var frame = try reader.read_frame();
+    var frame_index = timestamp_to_frame(from, &info);
+
+    while (true) {
+        var frame = reader.read_frame() catch |err| {
+            switch (err) {
+                VideoReadFrameError.EOF => break,
+                else => return err,
+            }
+        };
         defer frame.deinit();
 
-        const name = try std.fmt.allocPrint(alloc, "frame-{d}.jpg", .{i});
+        if (frame.frame.*.pts > to)
+            break;
+
+        if (frame.frame.*.pts < from)
+            continue;
+
+        const name = try std.fmt.allocPrint(alloc, "frame-{d}.jpg", .{frame_index});
         defer alloc.free(name);
 
         try stdout.print("Save: {s}\n", .{name});
         try stdout.flush();
 
-        try saver.save(frame.frame, name);
+        try saver.save(frame.frame, out, name);
+        frame_index += 1;
     }
 }
