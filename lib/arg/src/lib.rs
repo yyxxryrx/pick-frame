@@ -46,6 +46,13 @@ impl std::str::FromStr for Time {
         if let Ok(frame) = s.parse::<u64>() {
             return Ok(Self::Frame(frame));
         }
+        if s.ends_with('s') {
+            let sub = s.chars().take(s.len() - 1).collect::<String>();
+            let Ok(v)  = sub.parse::<f64>() else {
+                return Err(format!("Wrong second format: '{sub}'"));
+            };
+            return Ok(Self::Time(Duration::from_secs_f64(v)));
+        }
         let segments = s.split(':').collect::<Vec<_>>();
         if segments.len() > 3 || segments.len() < 2 {
             return Err("Wrong time format".to_string());
@@ -109,13 +116,13 @@ impl From<Time> for TimeType {
 }
 
 #[derive(Debug, Parser)]
-#[command(about = "A simple video frame picker\n\nTips:\n\t`xxx` is frame index\n\t`xx:xx.xx` is timestamp\n\t`end` is the end of video")]
+#[command(about = "A simple video frame picker\n\nTips:\n\t`xxx` is frame index\n\t`xx:xx.xx` is timestamp\n\t`end` is the end of video\n\t`xx.xxs` is seconds-base timestamp")]
 struct Cli {
     #[clap(short, long, help = "The video path")]
     input: String,
-    #[clap(short, long, help = "possible format: [xxx, xx:xx.xx, end]", default_value = "0")]
+    #[clap(short, long, help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]", default_value = "0")]
     from: Time,
-    #[clap(short, long, help = "possible format: [xxx, xx:xx.xx, end]", default_value = "end")]
+    #[clap(short, long, help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]", default_value = "end")]
     to: Time,
     #[clap(help = "Output path", default_value = ".")]
     output: String,
