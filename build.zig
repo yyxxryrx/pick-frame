@@ -89,25 +89,28 @@ pub fn build(b: *std.Build) void {
         std.process.exit(1);
     };
 
-    const triplet = "x64-windows-static";
+    const is_dynamic = b.option(bool, "dynamic-link", "dynamic link ffmpeg") orelse false;
+
+    const triplet = if (is_dynamic) "x64-windows" else "x64-windows-static";
     const vcpkg_include = b.pathJoin(&.{ vcpkg_root, "installed", triplet, "include" });
     const vcpkg_lib = b.pathJoin(&.{ vcpkg_root, "installed", triplet, "lib" });
+    const link_mode: std.builtin.LinkMode = if (is_dynamic) .dynamic else .static;
 
     exe.root_module.addIncludePath(std.Build.LazyPath{ .cwd_relative = vcpkg_include });
     exe.root_module.addLibraryPath(std.Build.LazyPath{ .cwd_relative = vcpkg_lib });
 
-    exe.root_module.linkSystemLibrary("avdevice", .{.preferred_link_mode = .static});
-    exe.root_module.linkSystemLibrary("avformat", .{.preferred_link_mode = .static});
-    exe.root_module.linkSystemLibrary("avfilter", .{.preferred_link_mode = .static});
-    exe.root_module.linkSystemLibrary("avcodec", .{.preferred_link_mode = .static});
-    exe.root_module.linkSystemLibrary("swresample", .{.preferred_link_mode = .static});
-    exe.root_module.linkSystemLibrary("swscale", .{.preferred_link_mode = .static});
-    exe.root_module.linkSystemLibrary("avutil", .{.preferred_link_mode = .static});
+    exe.root_module.linkSystemLibrary("avdevice", .{.preferred_link_mode = link_mode});
+    exe.root_module.linkSystemLibrary("avformat", .{.preferred_link_mode = link_mode});
+    exe.root_module.linkSystemLibrary("avfilter", .{.preferred_link_mode = link_mode});
+    exe.root_module.linkSystemLibrary("avcodec", .{.preferred_link_mode = link_mode});
+    exe.root_module.linkSystemLibrary("swresample", .{.preferred_link_mode = link_mode});
+    exe.root_module.linkSystemLibrary("swscale", .{.preferred_link_mode = link_mode});
+    exe.root_module.linkSystemLibrary("avutil", .{.preferred_link_mode = link_mode});
 
-    exe.root_module.linkSystemLibrary("libx264", .{.preferred_link_mode = .static}); // 如果你刚才安装了 [x264]
-    exe.root_module.linkSystemLibrary("zlib", .{.preferred_link_mode = .static});
-    // exe.root_module.linkSystemLibrary("liblzma", .{.preferred_link_mode = .static}); // 有时候 avformat 需要
-    exe.root_module.linkSystemLibrary("bz2", .{.preferred_link_mode = .static});     // 有时候 avformat 需要
+    exe.root_module.linkSystemLibrary("libx264", .{.preferred_link_mode = link_mode}); // 如果你刚才安装了 [x264]
+    exe.root_module.linkSystemLibrary("zlib", .{.preferred_link_mode = link_mode});
+    // exe.root_module.linkSystemLibrary("liblzma", .{.preferred_link_mode = link_mode}); // 有时候 avformat 需要
+    exe.root_module.linkSystemLibrary("bz2", .{.preferred_link_mode = link_mode});     // 有时候 avformat 需要
 
     exe.root_module.linkSystemLibrary("ws2_32", .{});  // 网络 socket
     exe.root_module.linkSystemLibrary("bcrypt", .{});  // 加密
