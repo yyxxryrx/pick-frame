@@ -35,7 +35,13 @@ zig build
 如果要构建发布版本
 
 ```bash
-zig build --release
+zig build --release=[mode]
+```
+
+例如构建 `ReleaseFast` 模式
+
+```bash
+zig build --release=fast
 ```
 
 ## 使用
@@ -48,8 +54,8 @@ Arguments:
 
 Options:
   -i, --input <INPUT>  The video path
-  -f, --from <FROM>    possible format: [xxx, xx:xx.xx, end] [default: 0]
-  -t, --to <TO>        possible format: [xxx, xx:xx.xx, end] [default: end]
+  -f, --from <FROM>    possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: 0]
+  -t, --to <TO>        possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: end]
   -h, --help           Print help
 ```
 
@@ -68,6 +74,10 @@ pick-frame.exe -i video.mp4 -f 10:10 -t 10:20
 # pick frames from 10:10 to end
 
 pick-frame.exe -i video.mp4 -f 10:10
+
+# pick frames from start to 10s
+
+pick-frame.exe -i vidoe.mp4 -t 10s
 
 # pick frames from 01:10:10.100 to 01:10:20.200 to output directory
 pick-frame.exe -i video.mp4 -f 01:10:10.100 -t 01:10:20.200 output
