@@ -81,13 +81,13 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.linkSystemLibrary("arg", .{.preferred_link_mode = .static});
 
-    const vcpkg_root = std.process.getEnvVarOwned(b.allocator, "VCPKG_ROOT") catch {
+    const vcpkg_root = b.option([]const u8, "vcpkg-path", "The path of vcpkg root") orelse (std.process.getEnvVarOwned(b.allocator, "VCPKG_ROOT") catch {
         // 如果读取失败（没设置这个变量），我们打印一个友好的错误提示并退出
         std.debug.print("Error: environment variable 'VCPKG_ROOT' is not set.\n", .{});
         std.debug.print("Please set it to your vcpkg installation path.\n", .{});
         std.debug.print("Example: set VCPKG_ROOT=C:\\Users\\yourname\\vcpkg\n", .{});
         std.process.exit(1);
-    };
+    });
 
     const is_dynamic = b.option(bool, "dynamic-link", "dynamic link ffmpeg") orelse false;
 
@@ -108,10 +108,10 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("avutil", .{.preferred_link_mode = link_mode});
 
     exe.root_module.linkSystemLibrary("libx264", .{.preferred_link_mode = link_mode}); // 如果你刚才安装了 [x264]
-    exe.root_module.linkSystemLibrary("zlib", .{.preferred_link_mode = link_mode});
-    // exe.root_module.linkSystemLibrary("liblzma", .{.preferred_link_mode = link_mode}); // 有时候 avformat 需要
-    exe.root_module.linkSystemLibrary("bz2", .{.preferred_link_mode = link_mode});     // 有时候 avformat 需要
-
+    if (!is_dynamic) {
+        exe.root_module.linkSystemLibrary("zlib", .{.preferred_link_mode = link_mode});
+        exe.root_module.linkSystemLibrary("bz2", .{.preferred_link_mode = link_mode});     // 有时候 avformat 需要
+    }
     exe.root_module.linkSystemLibrary("ws2_32", .{});  // 网络 socket
     exe.root_module.linkSystemLibrary("bcrypt", .{});  // 加密
     exe.root_module.linkSystemLibrary("secur32", .{}); // 安全

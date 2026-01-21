@@ -19,7 +19,7 @@
 
 ## 构建 - 静态编译
 
-> 需要安装 vcpkg 并设置 `VCPKG_ROOT` 环境变量
+> 需要安装 vcpkg 并设置 `VCPKG_ROOT` 环境变量，或者设置 `-Dvcpkg-path` 参数
 
 > 同样需要安装 `ffmpeg`
 
@@ -29,7 +29,6 @@
 
 ```bash
 vcpkg install ffmpeg[core,avcodec,avdevice,avformat,avfilter,swresample,swscale,x264,gpl]:x64-windows-static
-
 ```
 
 ### 2. 构建
@@ -52,7 +51,7 @@ zig build --release=fast
 
 ## 构建 - 动态编译
 
-> 需要安装 vcpkg 并设置 `VCPKG_ROOT` 环境变量
+> 需要安装 vcpkg 并设置 `VCPKG_ROOT` 环境变量，或者设置 `-Dvcpkg-path` 参数
 
 > 同样需要安装 `ffmpeg`
 
@@ -62,7 +61,6 @@ zig build --release=fast
 
 ```bash
 vcpkg install ffmpeg[core,avcodec,avdevice,avformat,avfilter,swresample,swscale,x264,gpl]:x64-windows
-
 ```
 
 ### 2. 构建
@@ -111,11 +109,9 @@ pick-frame.exe -i video.mp4 -f 0 -t 10:10
 pick-frame.exe -i video.mp4 -f 10:10 -t 10:20
 
 # pick frames from 10:10 to end
-
 pick-frame.exe -i video.mp4 -f 10:10
 
 # pick frames from start to 10s
-
 pick-frame.exe -i vidoe.mp4 -t 10s
 
 # pick frames from 01:10:10.100 to 01:10:20.200 to output directory
