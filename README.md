@@ -1,5 +1,8 @@
 # pick-frame
 
+[![Source](https://img.shields.io/badge/Source-GitHub-blue?logo=github)](https://github.com/yyxxryrx/pick-frame)
+[![MIT License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
 一个简单的视频帧提取工具
 
 此工具通过使用 `avformat_seek_file` 跳转到目标帧来实现快速定位，因此通常具有较快的速度。
