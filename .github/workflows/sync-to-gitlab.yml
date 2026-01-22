@@ -37,3 +37,6 @@ jobs:
                   # --force 强制覆盖，确保 GitLab 与 GitHub 完全一致
                   git push gitlab --all --force
                   git push gitlab --tags --force
+
+            - name: Cleanup
+              run: rm ~/.ssh/id_rsa
