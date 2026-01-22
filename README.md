@@ -90,10 +90,11 @@ Arguments:
   [OUTPUT]  Output path [default: .]
 
 Options:
-  -i, --input <INPUT>  The video path
-  -f, --from <FROM>    possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: 0]
-  -t, --to <TO>        possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: end]
-  -h, --help           Print help
+  -i, --input <INPUT>            The video path
+  -f, --from <FROM>              possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: 0]
+  -t, --to <TO>                  possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: end]
+      --thread-count <Auto|num>  thread count for codec [default: auto]
+  -h, --help                     Print help
 ```
 
 ## 示例
