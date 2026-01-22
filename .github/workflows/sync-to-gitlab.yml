@@ -1,0 +1,39 @@
+name: Sync to GitLab
+
+on:
+    # 触发条件：推送到 main 分支时，或者手动触发
+    push:
+        branches:
+            - main
+            - master
+    workflow_dispatch: # 允许在 GitHub 网页上手动点击运行
+
+jobs:
+    sync:
+        runs-on: ubuntu-latest
+        steps:
+            # 1. 检出代码
+            - name: Checkout source code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0 # 重要：拉取完整历史记录，否则无法同步所有分支
+
+            # 2. 配置 SSH 环境
+            - name: Setup SSH
+              shell: bash
+              run: |
+                  mkdir -p ~/.ssh
+                  echo "${{ secrets.GITLAB_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+                  chmod 600 ~/.ssh/id_rsa
+                  ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+
+            # 3. 推送到 GitLab
+            - name: Push to GitLab
+              run: |
+                  # 添加 GitLab 远程仓库地址
+                  git remote add gitlab git@gitlab.com:yyxxryrx/pick-frame.git
+
+                  # 推送所有分支和标签
+                  # --force 强制覆盖，确保 GitLab 与 GitHub 完全一致
+                  git push gitlab --all --force
+                  git push gitlab --tags --force
