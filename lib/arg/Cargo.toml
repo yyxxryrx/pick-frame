@@ -16,9 +16,21 @@ features = ["derive"]
 cbindgen = "0.29.2"
 
 [profile.release]
-lto = true
 debug = false
 opt-level = 3
+panic = "abort"
+overflow-checks = false
+debug-assertions = false
+
+[profile.release-safe]
+inherits = "release"
+overflow-checks = true
+
+[profile.release-small]
+inherits = "release"
+lto = true
+debug = false
+opt-level = "s"
 panic = "abort"
 codegen-units = 1
 overflow-checks = false

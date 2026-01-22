@@ -30,6 +30,12 @@ pub fn build(b: *std.Build) void {
         .off => &. {
             "cargo", "build"
         },
+        .small => &.{
+            "cargo", "build", "--profile=release-small"
+        },
+        .safe => &.{
+            "cargo", "build", "--profile=release-safe"
+        },
         else => &.{
             "cargo", "build", "--release"
         }
