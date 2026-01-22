@@ -187,6 +187,11 @@ const VideoReadFrameError = error {
     EOF,
 };
 
+const VideoReaderArgs = struct {
+    video_info: ?VideoInfo = null,
+    thread_count: u16 = 0,
+};
+
 const VideoReader = struct {
 
     fmt_ctx: ?*c.AVFormatContext = null,
@@ -194,8 +199,8 @@ const VideoReader = struct {
     info: VideoInfo,
 
 
-    pub fn init(path: []const u8, video_info: ?VideoInfo) !VideoReader {
-        const info = video_info orelse try get_video_info(path);
+    pub fn init(path: []const u8, args: VideoReaderArgs) !VideoReader {
+        const info = args.video_info orelse try get_video_info(path);
 
         const alloc = std.heap.page_allocator;
         _ = c.avformat_network_init();
@@ -231,6 +236,7 @@ const VideoReader = struct {
 
         const codec_context = c.avcodec_alloc_context3(codec);
         try error_handle(c.avcodec_parameters_to_context(codec_context, codec_par));
+        codec_context.*.thread_count = args.thread_count;
 
         try error_handle(c.avcodec_open2(codec_context, codec, null));
 
@@ -427,7 +433,10 @@ fn run(args: [*c]arg.ArgParseResult) !void {
 
     std.debug.print("start: {d} end: {d}\n", .{from, to});
 
-    var reader = try VideoReader.init(input, info);
+    var reader = try VideoReader.init(input, .{
+        .video_info = info,
+        .thread_count = args.*.thread_count,
+    });
     defer reader.deinit();
     var saver = try ToImage.init(@bitCast(info.width), @bitCast(info.height), info.fmt, .{});
     defer saver.deinit();
