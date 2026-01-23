@@ -97,6 +97,7 @@ Options:
   -f, --from <FROM>              possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: 0]
   -t, --to <TO>                  possible format: [xxx, xx.xxs, xx:xx.xx, end] [default: end]
       --thread-count <Auto|num>  thread count for codec [default: auto]
+      --format <FORMAT>          filename format [default: frame-%d.jpg]
   -h, --help                     Print help
 ```
 
