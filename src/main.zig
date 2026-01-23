@@ -248,13 +248,22 @@ const VideoReader = struct {
     }
 
     pub fn read_frame(self: @This()) VideoReadFrameError!VideoFrame {
-        const index  = self.info.frame_index;
-        const pkt = c.av_packet_alloc();
         const frame = c.av_frame_alloc();
+
+        if (c.avcodec_receive_frame(self.codec_ctx, frame) == 0)
+            return VideoFrame.init(frame);
+        c.av_frame_unref(frame);
+
+        const index  = self.info.frame_index;
+        var pkt = c.av_packet_alloc();
+        defer c.av_packet_free(&pkt);
+        
+
 
         while (c.av_read_frame(self.fmt_ctx, pkt) >= 0) {
             if (pkt.*.stream_index == index) {
-                if (c.avcodec_send_packet(self.codec_ctx, pkt) < 0) continue;
+                const ret = c.avcodec_send_packet(self.codec_ctx, pkt);
+                if (ret < 0 and ret != c.AVERROR(c.EAGAIN)) continue;
                 if (c.avcodec_receive_frame(self.codec_ctx, frame) == 0)
                     return VideoFrame.init(frame);
             }
