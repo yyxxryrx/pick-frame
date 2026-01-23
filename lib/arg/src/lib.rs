@@ -29,6 +29,7 @@ pub struct ArgParseResult {
     pub start: TimeType,
     pub end: TimeType,
     pub thread_count: u16,
+    pub format: *const c_char,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +50,7 @@ impl std::str::FromStr for Time {
         }
         if s.ends_with('s') {
             let sub = s.chars().take(s.len() - 1).collect::<String>();
-            let Ok(v)  = sub.parse::<f64>() else {
+            let Ok(v) = sub.parse::<f64>() else {
                 return Err(format!("Wrong second format: '{sub}'"));
             };
             return Ok(Self::Time(Duration::from_secs_f64(v)));
@@ -126,7 +127,7 @@ impl From<ThreadCount> for u16 {
     fn from(value: ThreadCount) -> Self {
         match value {
             ThreadCount::Auto => 0,
-            ThreadCount::Custom(v) => v
+            ThreadCount::Custom(v) => v,
         }
     }
 }
@@ -135,24 +136,45 @@ impl std::str::FromStr for ThreadCount {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("auto") {
-                Ok(Self::Auto)
+            Ok(Self::Auto)
         } else {
-            s.parse::<u16>().map(Self::Custom).map_err(|err| err.to_string())
+            s.parse::<u16>()
+                .map(Self::Custom)
+                .map_err(|err| err.to_string())
         }
     }
 }
 
 #[derive(Debug, Parser)]
-#[command(about = "A simple video frame picker\n\nTips:\n\t`xxx` is frame index\n\t`xx:xx.xx` is timestamp\n\t`end` is the end of video\n\t`xx.xxs` is seconds-base timestamp")]
+#[command(
+    about = "A simple video frame picker\n\nTips:\n\t`xxx` is frame index\n\t`xx:xx.xx` is timestamp\n\t`end` is the end of video\n\t`xx.xxs` is seconds-base timestamp"
+)]
 struct Cli {
     #[clap(short, long, help = "The video path")]
     input: String,
-    #[clap(short, long, help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]", default_value = "0")]
+    #[clap(
+        short,
+        long,
+        help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]",
+        default_value = "0"
+    )]
     from: Time,
-    #[clap(short, long, help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]", default_value = "end")]
+    #[clap(
+        short,
+        long,
+        help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]",
+        default_value = "end"
+    )]
     to: Time,
-    #[arg(long, value_name = "Auto|num", help = "thread count for codec", default_value = "auto")]
+    #[arg(
+        long,
+        value_name = "Auto|num",
+        help = "thread count for codec",
+        default_value = "auto"
+    )]
     thread_count: ThreadCount,
+    #[arg(long, help = "filename format", default_value = "frame-%d.jpg")]
+    format: String,
     #[clap(help = "Output path", default_value = ".")]
     output: String,
 }
@@ -165,7 +187,8 @@ pub extern "C" fn parse() -> *mut ArgParseResult {
         output: CString::new(cli.output).unwrap_or_default().into_raw(),
         start: cli.from.into(),
         end: cli.to.into(),
-        thread_count: cli.thread_count.into()
+        thread_count: cli.thread_count.into(),
+        format: CString::new(cli.format).unwrap_or_default().into_raw(),
     }))
 }
 

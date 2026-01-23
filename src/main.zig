@@ -4,11 +4,21 @@ const c = @cImport({
     @cInclude("libavcodec/avcodec.h");
     @cInclude("libavutil/avutil.h");
     @cInclude("libswscale/swscale.h");
+    @cInclude("stdio.h");
 });
 
 const arg = @cImport({
     @cInclude("arg.h");
 });
+
+// const PATH_MAX = blk: {
+//     const ci = @cImport({
+//         @cInclude("limits.h");
+//     });
+//     break :blk @as(u16, @intCast(ci.PATH_MAX));
+// };
+
+const PATH_MAX: usize = 260;
 
 const ffmpeg_err = error{
     CannotFoundBestStream,
@@ -52,6 +62,22 @@ fn error_handle(code: c_int) !void {
     try stderr.print("{s}\n", .{av_err2str(code)});
     try stderr.flush();
     std.process.exit(1);
+}
+
+fn format_str(fmt: []const u8, buffer: *[PATH_MAX]u8, args: anytype) !void {
+    const alloc = std.heap.page_allocator;
+
+    const c_fmt = try alloc.alloc(u8, fmt.len + 1);
+    defer alloc.free(c_fmt);
+ 
+    std.mem.copyForwards(u8, c_fmt[0..fmt.len], fmt);
+    c_fmt[fmt.len] = 0;
+
+    const len = c.snprintf(@ptrCast(buffer), PATH_MAX, @ptrCast(c_fmt.ptr), args);
+    if (len < 0) 
+        return error.OutOfMemory;
+    if (len >= PATH_MAX)
+        return error.OutOfMemory;
 }
 
 fn get_video_info(path: []const u8) !VideoInfo {
@@ -258,8 +284,6 @@ const VideoReader = struct {
         var pkt = c.av_packet_alloc();
         defer c.av_packet_free(&pkt);
         
-
-
         while (c.av_read_frame(self.fmt_ctx, pkt) >= 0) {
             if (pkt.*.stream_index == index) {
                 const ret = c.avcodec_send_packet(self.codec_ctx, pkt);
@@ -270,7 +294,7 @@ const VideoReader = struct {
         }
         return VideoReadFrameError.EOF;
     }
-    
+
     pub fn seek(self: @This(), timestamp: i64) !void {
         // zig fmt: off
         try error_handle(
@@ -405,7 +429,6 @@ pub fn main() !void {
 
 
 fn run(args: [*c]arg.ArgParseResult) !void {
-    const alloc = std.heap.page_allocator;
     var buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&buffer);
     const stdout = &stdout_writer.interface;
@@ -415,6 +438,7 @@ fn run(args: [*c]arg.ArgParseResult) !void {
 
     const input: []const u8 = std.mem.sliceTo(args.*.input, 0);
     const output: []const u8 = std.mem.sliceTo(args.*.output, 0);
+    const format: []const u8 = std.mem.sliceTo(args.*.format, 0);
 
     std.fs.cwd().access(input, .{}) catch return cli_err.CannotFoundFile;
 
@@ -469,8 +493,9 @@ fn run(args: [*c]arg.ArgParseResult) !void {
         if (frame.frame.*.pts < from)
             continue;
 
-        const name = try std.fmt.allocPrint(alloc, "frame-{d}.jpg", .{frame_index});
-        defer alloc.free(name);
+        var buf: [PATH_MAX]u8 = undefined;
+        try format_str(format, &buf, @as(c_ulonglong, @intCast(frame_index)));
+        const name: []const u8 = std.mem.sliceTo(&buf, 0);
 
         try stdout.print("Save: {s}\n", .{name});
         try stdout.flush();
