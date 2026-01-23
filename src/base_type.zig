@@ -1,6 +1,4 @@
-const av = @cImport({
-    @cInclude("libavformat/avformat.h");
-});
+const av = @import("cimport.zig").av;
 
 const std = @import("std");
 

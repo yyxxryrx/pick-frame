@@ -1,16 +1,13 @@
 const std = @import("std");
 
-const av = @cImport({
-    @cInclude("libavcodec/avcodec.h");
-    @cInclude("libavformat/avformat.h");
-});
+const av = @import("cimport.zig").av;
 
 const err = @import("error.zig");
 const util = @import("util.zig");
 const base_type = @import("base_type.zig");
 const info = @import("read_video_info.zig");
 
-const VideoFrame = struct {
+pub const VideoFrame = struct {
     frame: [*c]av.AVFrame,
 
     pub fn init(frame: *av.AVFrame) VideoFrame {
@@ -22,12 +19,12 @@ const VideoFrame = struct {
     }
 };
 
-const VideoReaderArgs = struct {
+pub const VideoReaderArgs = struct {
     video_info: ?base_type.VideoInfo = null,
     thread_count: u16 = 0,
 };
 
-const VideoReader = struct {
+pub const VideoReader = struct {
     fmt_ctx: ?*av.AVFormatContext = null,
     codec_ctx: ?*av.AVCodecContext = null,
     info: base_type.VideoInfo,

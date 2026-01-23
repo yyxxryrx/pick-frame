@@ -1,11 +1,6 @@
 const std = @import("std");
 
-const av = @cImport({
-    @cInclude("libavformat/avformat.h");
-    @cInclude("libavcodec/avcodec.h");
-    @cInclude("libavutil/avutil.h");
-    @cInclude("libswscale/swscale.h");
-});
+const av = @import("cimport.zig").av;
 
 const util = @import("util.zig");
 const err = @import("error.zig");

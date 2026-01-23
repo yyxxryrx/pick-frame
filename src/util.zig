@@ -4,9 +4,7 @@ const c = @cImport({
     @cInclude("stdio.h");
 });
 
-const av = @cImport({
-    @cInclude("libavutil/avutil.h");
-});
+const av = @import("cimport.zig").av;
 
 const base_type = @import("base_type.zig");
 
@@ -30,7 +28,7 @@ pub fn format_str(fmt: []const u8, buffer: *[PATH_MAX]u8, args: anytype) !void {
 
 pub fn av_err2str(errenum: c_int) []const u8 {
     var buf: [128]u8 = undefined;
-    if (c.av_strerror(errenum, &buf, buf.len) != 0)
+    if (av.av_strerror(errenum, &buf, buf.len) != 0)
         return "Unknown error";
     return std.mem.sliceTo(&buf, 0);
 }
@@ -62,7 +60,7 @@ pub fn frame_to_timestamp(frame_index: u64, info: *const base_type.VideoInfo) i6
     // 【关键修复】加上流的起始时间 (start_time)
     // 很多视频不是从 0 开始的，如果不加这个，Seek 就会跳回开头
     // =======================================================
-    if (start_time != c.AV_NOPTS_VALUE) {
+    if (start_time != av.AV_NOPTS_VALUE) {
         target_ts += start_time;
     }
     return target_ts;
@@ -74,7 +72,7 @@ pub fn milliseconds_to_timestamp(ms: u64, info: *const base_type.VideoInfo) i64 
     const seconds = @as(f64, @floatFromInt(ms)) / 1000.0;
     const tb_val = @as(f64, @floatFromInt(time_base.num)) / @as(f64, @floatFromInt(time_base.den));
     var target_ts: i64 = @intFromFloat(seconds / tb_val);
-    if (start_time != c.AV_NOPTS_VALUE) {
+    if (start_time != av.AV_NOPTS_VALUE) {
         target_ts += start_time;
     }
     return target_ts;
@@ -85,7 +83,7 @@ pub fn timestamp_to_frame(timestamp: i64, info: *const base_type.VideoInfo) u64 
     const time_base = info.time_base;
     const start_time = info.start_time;
     var ts = timestamp;
-    if (start_time != c.AV_NOPTS_VALUE) {
+    if (start_time != av.AV_NOPTS_VALUE) {
         ts -= start_time;
     }
     return @as(u64, @intFromFloat(@divFloor(@as(f64, @floatFromInt(ts)) * @as(f64, @floatFromInt(time_base.num)) * fps, @as(f64, @floatFromInt(time_base.den)))));

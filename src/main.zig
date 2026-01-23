@@ -1,11 +1,4 @@
 const std = @import("std");
-const c = @cImport({
-    @cInclude("libavformat/avformat.h");
-    @cInclude("libavcodec/avcodec.h");
-    @cInclude("libavutil/avutil.h");
-    @cInclude("libswscale/swscale.h");
-    @cInclude("stdio.h");
-});
 
 const arg = @cImport({
     @cInclude("arg.h");

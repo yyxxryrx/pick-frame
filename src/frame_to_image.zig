@@ -1,14 +1,11 @@
-const av = @cImport({
-    @cInclude("libavcodec/avcodec.h");
-    @cInclude("libswscale/swscale.h");
-});
+const av = @import("cimport.zig").av;
 
 const std = @import("std");
 
 const err = @import("error.zig");
 const util = @import("util.zig");
 
-const ToImage = struct {
+pub const ToImage = struct {
     format: c_int,
     codec: [*c]const av.AVCodec,
     codec_ctx: [*c]av.AVCodecContext,

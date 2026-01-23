@@ -1,4 +1,4 @@
-const ffmpeg_err = error{
+pub const ffmpeg_err = error{
     CannotFoundBestStream,
     CannotFoundCodec,
     CannotAllocateCodecContext,
@@ -6,8 +6,8 @@ const ffmpeg_err = error{
     AllocateFrameFailed,
 };
 
-const cli_err = error{ CannotFoundFile, InvalidRange };
+pub const cli_err = error{ CannotFoundFile, InvalidRange };
 
-const VideoReadFrameError = error{
+pub const VideoReadFrameError = error{
     EOF,
 };
