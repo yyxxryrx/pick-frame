@@ -1,9 +1,11 @@
+use nom::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::u64;
 use nom::multi::many0;
-use nom::IResult;
-use nom::Parser;
+use nom::{IResult, Offset};
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::time::Duration;
 
 type Span<'a> = nom_locate::LocatedSpan<&'a str>;
@@ -12,7 +14,7 @@ trait Token {
     fn token(&self) -> &'static str;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum DSLKeywords {
     End,
     From,
@@ -148,11 +150,37 @@ pub fn parse_timestamp3(input: Span) -> IResult<Span, DSLType> {
     ))
 }
 
-pub fn parse_item(input: Span) -> IResult<Span, Option<DSLType>> {
+#[derive(Debug)]
+pub struct DSLItem<T: Debug> {
+    pub content: T,
+    pub offset: usize,
+    pub length: usize,
+}
+
+impl<T: Debug + PartialEq> PartialEq for DSLItem<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.content.eq(&other.content)
+    }
+}
+
+impl<T: Debug + PartialEq> PartialEq<T> for DSLItem<T> {
+    fn eq(&self, other: &T) -> bool {
+        other.eq(&self.content)
+    }
+}
+
+impl<T: Debug> DSLItem<T> {
+    pub fn set(&mut self, content: T) {
+        self.content = content;
+    }
+}
+
+pub fn parse_item(input: Span) -> IResult<Span, Option<DSLItem<DSLType>>> {
     let (input, _) = many0(tag(" ")).parse(input)?;
     if input.is_empty() {
         return Ok((input, None));
     }
+    let offset = input.location_offset();
     let (input, item) = alt((
         parse_keyword,
         parse_frame_index,
@@ -161,14 +189,32 @@ pub fn parse_item(input: Span) -> IResult<Span, Option<DSLType>> {
         parse_timestamp2,
     ))
     .parse(input)?;
-    Ok((input, Some(item)))
+    Ok((
+        input,
+        Some(DSLItem {
+            offset,
+            content: item,
+            length: input.location_offset() - offset,
+        }),
+    ))
 }
 
-#[derive(Debug, Clone, Copy)]
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DSLOp {
     Add,
     Sub,
+}
+
+impl DSLOp {
+    fn reversed(&self) -> Self {
+        match self {
+            Self::Add => Self::Sub,
+            Self::Sub => Self::Add,
+        }
+    }
+    fn reverse(&mut self) {
+        *self = self.reversed();
+    }
 }
 
 impl Token for DSLOp {
@@ -180,19 +226,27 @@ impl Token for DSLOp {
     }
 }
 
-pub fn parse_op(input: Span) -> IResult<Span, Option<DSLOp>> {
+pub fn parse_op(input: Span) -> IResult<Span, Option<DSLItem<DSLOp>>> {
     let (input, _) = many0(tag(" ")).parse(input)?;
     if input.is_empty() {
         return Ok((input, None));
     }
+    let offset = input.location_offset();
     let (input, op) = alt((_parse(DSLOp::Add), _parse(DSLOp::Sub))).parse(input)?;
-    Ok((input, Some(op)))
+    Ok((
+        input,
+        Some(DSLItem {
+            offset,
+            content: op,
+            length: input.location_offset() - offset,
+        }),
+    ))
 }
 
 #[derive(Debug, Default)]
 pub struct Expr {
-    items: Vec<DSLType>,
-    ops: Vec<DSLOp>,
+    items: Vec<DSLItem<DSLType>>,
+    ops: Vec<DSLItem<DSLOp>>,
 }
 
 pub fn parse_expr(input: Span) -> IResult<Span, Expr> {
@@ -216,6 +270,104 @@ pub fn parse_expr(input: Span) -> IResult<Span, Expr> {
         }
     }
     Ok((input, Expr { items, ops }))
+}
+
+macro_rules! get {
+    ($($name:ident)::*, $val:expr) => {
+        match $val {
+            $($name)::*(v) => v,
+            _ => unreachable!(),
+        }
+    };
+}
+
+pub fn optimize_expr(expr: &mut Expr) {
+    if expr.items.len() < 3 {
+        return;
+    }
+    expr.ops.insert(
+        1,
+        DSLItem {
+            content: DSLOp::Add,
+            offset: 0,
+            length: 0,
+        },
+    );
+    let mut frame_index: Option<usize> = None;
+    let mut time_index: Option<usize> = None;
+    let mut index = 0;
+    while index < expr.items.len() {
+        println!("{expr:?}");
+        match expr.items[index].content {
+            DSLType::FrameIndex(this) => match frame_index {
+                Some(first_index) => {
+                    let first = get!(DSLType::FrameIndex, expr.items[first_index].content);
+                    if expr.ops[first_index] == expr.ops[index] {
+                        expr.items[first_index].set(DSLType::FrameIndex(first + this));
+                    } else {
+                        if first > this {
+                            expr.items[first_index].set(DSLType::FrameIndex(first - this));
+                        } else {
+                            expr.ops[first_index].content.reverse();
+                            expr.items[first_index].set(DSLType::FrameIndex(this - first));
+                        }
+                    }
+                    expr.ops.remove(index);
+                    expr.items.remove(index);
+                    continue;
+                }
+                None => frame_index = Some(index),
+            },
+            DSLType::Timestamp(this) => match time_index {
+                Some(first_index) => {
+                    let first = get!(DSLType::Timestamp, expr.items[first_index].content);
+                    if expr.ops[first_index] == expr.ops[index] {
+                        expr.items[first_index].set(DSLType::Timestamp(first + this));
+                    } else {
+                        if first > this {
+                            expr.items[first_index].set(DSLType::Timestamp(first - this));
+                        } else {
+                            expr.ops[first_index].content.reverse();
+                            expr.items[first_index].set(DSLType::Timestamp(this - first));
+                        }
+                    }
+                    expr.ops.remove(index);
+                    expr.items.remove(index);
+                    continue;
+                }
+                None => time_index = Some(index),
+            },
+            DSLType::Keyword(..) => {}
+        }
+        index += 1;
+    }
+}
+
+pub fn check_expr(expr: &Expr) -> Result<(), String> {
+    let mut counter = HashMap::<DSLKeywords, isize>::new();
+    let mut has_add = false;
+    for (item, op) in expr.items.iter().zip(expr.ops.iter()) {
+        match item.content {
+            DSLType::Keyword(word) => {
+                if *op == DSLOp::Add {
+                    *counter.entry(word).or_default() += 1;
+                } else {
+                    *counter.entry(word).or_default() -= 1;
+                }
+            }
+            _ => {}
+        }
+        if *op == DSLOp::Add {
+            has_add = true;
+        }
+    }
+    if !has_add {
+        return Err("Overflow: all is sub".to_string());
+    }
+    if counter.values().any(|v| v.abs() > 1) {
+        return Err("Too many keywords".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -333,59 +485,59 @@ mod tests {
         ];
         for (word, keyword) in keywords {
             let (_, k) = parse_item(word.into()).unwrap();
-            assert_eq!(DSLType::Keyword(keyword), k.unwrap());
+            assert_eq!(DSLType::Keyword(keyword), k.unwrap().content);
         }
         let (_, val) = parse_item("100f".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::FrameIndex(v) => assert_eq!(v, 100),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("100.0s".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs_f64(100f64)),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("100.11s".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs_f64(100.11)),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("0:1".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs(1)),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("1:2".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs(62)),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("1:2:3".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs(3723)),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("1:2:3.4".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => {
                 assert_eq!(v, Duration::from_secs(3723) + Duration::from_millis(400))
             }
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("1.4".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => {
                 assert_eq!(v, Duration::from_secs(1) + Duration::from_millis(400))
             }
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("100ms".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_millis(100)),
             _ => panic!("Error type"),
         }
         let (_, val) = parse_item("114514ms".into()).unwrap();
-        match val.unwrap() {
+        match val.unwrap().content {
             DSLType::Timestamp(v) => assert_eq!(v, Duration::from_millis(114514)),
             _ => panic!("Error type"),
         }
@@ -399,23 +551,37 @@ mod tests {
     #[test]
     fn test_expr_parser() {
         let (_, expr) = parse_expr("end + from - to + 1f - 2s + 3ms - 4:5".into()).unwrap();
-        assert_eq!(expr.items, vec![
+        let items = vec![
             DSLType::Keyword(DSLKeywords::End),
             DSLType::Keyword(DSLKeywords::From),
             DSLType::Keyword(DSLKeywords::To),
             DSLType::FrameIndex(1),
             DSLType::Timestamp(Duration::from_secs_f64(2f64)),
             DSLType::Timestamp(Duration::from_millis(3)),
-            DSLType::Timestamp(Duration::from_secs(245))
-        ]);
-        assert_eq!(expr.ops, vec![
-            DSLOp::Add,
-            DSLOp::Sub,
-            DSLOp::Add,
-            DSLOp::Sub,
-            DSLOp::Add,
-            DSLOp::Sub,
-        ]);
+            DSLType::Timestamp(Duration::from_secs(245)),
+        ];
+        for (item, expr_item) in items.iter().zip(expr.items.iter()) {
+            assert_eq!(*item, expr_item.content);
+        }
+        assert_eq!(
+            expr.ops,
+            vec![
+                DSLOp::Add,
+                DSLOp::Sub,
+                DSLOp::Add,
+                DSLOp::Sub,
+                DSLOp::Add,
+                DSLOp::Sub,
+            ]
+        );
         assert!(parse_expr("++".into()).is_err());
+    }
+
+    #[test]
+    fn test_expr_opt() {
+        // end + from - to + 1f - 246.997s
+        let (_, mut expr) = parse_expr("end + from - to + 1f - 2s + 3ms - 4:5".into()).unwrap();
+        optimize_expr(&mut expr);
+        println!("{expr:?}");
     }
 }

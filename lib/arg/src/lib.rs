@@ -1,4 +1,5 @@
 mod lexer;
+mod tui;
 
 use clap::Parser;
 use std::{ffi::CString, os::raw::c_char, time::Duration};
