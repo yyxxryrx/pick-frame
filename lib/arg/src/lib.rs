@@ -1,3 +1,5 @@
+mod lexer;
+
 use clap::Parser;
 use std::{ffi::CString, os::raw::c_char, time::Duration};
 
