@@ -1,20 +1,62 @@
-use nom::IResult;
+use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::u64;
+use nom::multi::many0;
+use nom::IResult;
+use nom::Parser;
 use std::time::Duration;
 
 type Span<'a> = nom_locate::LocatedSpan<&'a str>;
 
+trait Token {
+    fn token(&self) -> &'static str;
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum DSLKeywords {
+    End,
+    From,
+    To,
+}
+
+impl Token for DSLKeywords {
+    fn token(&self) -> &'static str {
+        match self {
+            Self::End => "end",
+            Self::From => "from",
+            Self::To => "to",
+        }
+    }
+}
+
+fn _parse<T>(token: T) -> Box<dyn Fn(Span) -> IResult<Span, T>>
+where
+    T: Token + Copy + 'static,
+{
+    Box::new(move |input: Span| {
+        let (input, _) = tag(token.token())(input)?;
+        Ok((input, token))
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum DSLType {
     FrameIndex(u64),
     Timestamp(Duration),
+    Keyword(DSLKeywords),
 }
 
-pub fn parse_frame_index1(input: Span) -> IResult<Span, DSLType> {
-    u64(input).map(|(s, v)| (s, DSLType::FrameIndex(v)))
+pub fn parse_keyword(input: Span) -> IResult<Span, DSLType> {
+    let (input, keyword) = alt((
+        _parse(DSLKeywords::End),
+        _parse(DSLKeywords::From),
+        _parse(DSLKeywords::To),
+    ))
+    .parse(input)?;
+    Ok((input, DSLType::Keyword(keyword)))
 }
 
-pub fn parse_frame_index2(input: Span) -> IResult<Span, DSLType> {
+pub fn parse_frame_index(input: Span) -> IResult<Span, DSLType> {
     let (input, value) = u64(input)?;
     Ok((tag("f")(input)?.0, DSLType::FrameIndex(value)))
 }
@@ -98,29 +140,111 @@ pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
     Ok((input, DSLType::Timestamp(time)))
 }
 
+pub fn parse_timestamp3(input: Span) -> IResult<Span, DSLType> {
+    let (input, value) = u64(input)?;
+    Ok((
+        tag("ms")(input)?.0,
+        DSLType::Timestamp(Duration::from_millis(value)),
+    ))
+}
+
+pub fn parse_item(input: Span) -> IResult<Span, Option<DSLType>> {
+    let (input, _) = many0(tag(" ")).parse(input)?;
+    if input.is_empty() {
+        return Ok((input, None));
+    }
+    let (input, item) = alt((
+        parse_keyword,
+        parse_frame_index,
+        parse_timestamp1,
+        parse_timestamp3,
+        parse_timestamp2,
+    ))
+    .parse(input)?;
+    Ok((input, Some(item)))
+}
+
+#[derive(Debug, Clone, Copy)]
+#[derive(PartialEq)]
+pub enum DSLOp {
+    Add,
+    Sub,
+}
+
+impl Token for DSLOp {
+    fn token(&self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+        }
+    }
+}
+
+pub fn parse_op(input: Span) -> IResult<Span, Option<DSLOp>> {
+    let (input, _) = many0(tag(" ")).parse(input)?;
+    if input.is_empty() {
+        return Ok((input, None));
+    }
+    let (input, op) = alt((_parse(DSLOp::Add), _parse(DSLOp::Sub))).parse(input)?;
+    Ok((input, Some(op)))
+}
+
+#[derive(Debug, Default)]
+pub struct Expr {
+    items: Vec<DSLType>,
+    ops: Vec<DSLOp>,
+}
+
+pub fn parse_expr(input: Span) -> IResult<Span, Expr> {
+    let (mut input, Some(item)) = parse_item(input)? else {
+        return Ok((input, Expr::default()));
+    };
+    let mut items = vec![item];
+    let mut ops = vec![];
+    while !input.is_empty() {
+        let res = parse_op(input)?;
+        input = res.0;
+        let Some(op) = res.1 else {
+            break;
+        };
+        ops.push(op);
+
+        let res = parse_item(input)?;
+        input = res.0;
+        if let Some(item) = res.1 {
+            items.push(item);
+        }
+    }
+    Ok((input, Expr { items, ops }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_frame_parse1() {
-        let (_, val) = parse_frame_index1("100".into()).unwrap();
-        match val {
-            DSLType::FrameIndex(v) => assert_eq!(v, 100),
-            _ => panic!("Error type"),
+    fn test_keyword_parser() {
+        let keywords = vec![
+            ("end", DSLKeywords::End),
+            ("from", DSLKeywords::From),
+            ("to", DSLKeywords::To),
+        ];
+        for (word, keyword) in keywords {
+            let (_, k) = parse_keyword(word.into()).unwrap();
+            assert_eq!(DSLType::Keyword(keyword), k);
         }
-        assert!(parse_frame_index1("a".into()).is_err())
+        assert!(parse_keyword("hello".into()).is_err());
     }
 
     #[test]
-    fn test_frame_parse2() {
-        let (_, val) = parse_frame_index2("100f".into()).unwrap();
+    fn test_frame_parser() {
+        let (_, val) = parse_frame_index("100f".into()).unwrap();
         match val {
             DSLType::FrameIndex(v) => assert_eq!(v, 100),
             _ => panic!("Error type"),
         }
-        assert!(parse_frame_index2("100".into()).is_err());
-        assert!(parse_frame_index2("100d".into()).is_err());
+        assert!(parse_frame_index("100".into()).is_err());
+        assert!(parse_frame_index("100d".into()).is_err());
     }
 
     #[test]
@@ -182,5 +306,116 @@ mod tests {
         }
         assert!(parse_timestamp2("100".into()).is_err());
         assert!(parse_timestamp2("1:2:3:4".into()).is_err());
+    }
+
+    #[test]
+    fn test_timestamp_parser3() {
+        let (_, val) = parse_timestamp3("100ms".into()).unwrap();
+        match val {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_millis(100)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_timestamp3("114514ms".into()).unwrap();
+        match val {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_millis(114514)),
+            _ => panic!("Error type"),
+        }
+        assert!(parse_timestamp3("100.0ms".into()).is_err());
+        assert!(parse_timestamp3("100d".into()).is_err());
+    }
+
+    #[test]
+    fn test_item_parser() {
+        let keywords = vec![
+            ("end", DSLKeywords::End),
+            ("from", DSLKeywords::From),
+            ("to", DSLKeywords::To),
+        ];
+        for (word, keyword) in keywords {
+            let (_, k) = parse_item(word.into()).unwrap();
+            assert_eq!(DSLType::Keyword(keyword), k.unwrap());
+        }
+        let (_, val) = parse_item("100f".into()).unwrap();
+        match val.unwrap() {
+            DSLType::FrameIndex(v) => assert_eq!(v, 100),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("100.0s".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs_f64(100f64)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("100.11s".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs_f64(100.11)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("0:1".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs(1)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("1:2".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs(62)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("1:2:3".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_secs(3723)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("1:2:3.4".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => {
+                assert_eq!(v, Duration::from_secs(3723) + Duration::from_millis(400))
+            }
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("1.4".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => {
+                assert_eq!(v, Duration::from_secs(1) + Duration::from_millis(400))
+            }
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("100ms".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_millis(100)),
+            _ => panic!("Error type"),
+        }
+        let (_, val) = parse_item("114514ms".into()).unwrap();
+        match val.unwrap() {
+            DSLType::Timestamp(v) => assert_eq!(v, Duration::from_millis(114514)),
+            _ => panic!("Error type"),
+        }
+
+        assert!(parse_item("hello".into()).is_err());
+        assert!(parse_item("100".into()).is_err());
+        assert!(parse_item("100d".into()).is_err());
+        assert!(parse_item("1:2:3:4".into()).is_err());
+    }
+
+    #[test]
+    fn test_expr_parser() {
+        let (_, expr) = parse_expr("end + from - to + 1f - 2s + 3ms - 4:5".into()).unwrap();
+        assert_eq!(expr.items, vec![
+            DSLType::Keyword(DSLKeywords::End),
+            DSLType::Keyword(DSLKeywords::From),
+            DSLType::Keyword(DSLKeywords::To),
+            DSLType::FrameIndex(1),
+            DSLType::Timestamp(Duration::from_secs_f64(2f64)),
+            DSLType::Timestamp(Duration::from_millis(3)),
+            DSLType::Timestamp(Duration::from_secs(245))
+        ]);
+        assert_eq!(expr.ops, vec![
+            DSLOp::Add,
+            DSLOp::Sub,
+            DSLOp::Add,
+            DSLOp::Sub,
+            DSLOp::Add,
+            DSLOp::Sub,
+        ]);
+        assert!(parse_expr("++".into()).is_err());
     }
 }
