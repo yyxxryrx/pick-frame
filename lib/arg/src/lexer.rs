@@ -3,7 +3,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::u64;
 use nom::multi::many0;
-use nom::{IResult, Offset};
+use nom::IResult;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -230,14 +230,17 @@ pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DS
             _ => {}
         },
     }
-    let (input, item) = alt((
-        parse_frame_index,
-        parse_timestamp1,
-        parse_timestamp3,
-        parse_keyword,
-    ))
-    .parse(input)
-    .map_err(map_err_build(input.location_offset()))?;
+
+    let (input, item) =
+        match alt((parse_frame_index, parse_timestamp1, parse_timestamp3)).parse(input) {
+            Ok(res) => res,
+            Err(e) => match e {
+                nom::Err::Error(err) if err.code == nom::error::ErrorKind::Digit => {
+                    parse_keyword(input).map_err(map_err_build(input.location_offset()))?
+                }
+                _ => return Err(map_err(e, input.location_offset())),
+            },
+        };
     Ok((
         input,
         Some(DSLItem {
@@ -310,17 +313,25 @@ pub fn parse_expr(input: Span) -> error::ParseExprResult<Span, Expr> {
     let mut ops = vec![];
     while !input.is_empty() {
         let res = parse_op(input)?;
-        input = res.0;
         let Some(op) = res.1 else {
             break;
         };
+        input = res.0;
+        let offset = op.offset;
         ops.push(op);
 
         let res = parse_item(input)?;
+        let Some(item) = res.1 else {
+            return Err(map_err(
+                nom::Err::Failure(nom::error::Error::new(
+                    input,
+                    nom::error::ErrorKind::Escaped,
+                )),
+                offset,
+            ));
+        };
         input = res.0;
-        if let Some(item) = res.1 {
-            items.push(item);
-        }
+        items.push(item);
     }
     Ok((input, Expr { items, ops }))
 }

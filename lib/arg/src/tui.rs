@@ -23,43 +23,53 @@ pub fn show_error(
 
 #[cfg(test)]
 mod tests {
-    use nom::character::complete::alpha1;
     use super::show_error;
-    use crate::lexer::{parse_expr, Span};
+    use crate::lexer::{Span, parse_expr};
+    use nom::character::complete::alpha1;
 
     #[test]
     fn test_show_error() {
-        let from = "from - 1:2:3 + 1s +";
+        let from = r#"10s5f"#;
 
         match parse_expr(from.into()) {
-            Err(e) => {
-                println!("{e:?}");
-                match e {
-                    nom::Err::Error(err) | nom::Err::Failure(err) => match err.source.code {
-                        nom::error::ErrorKind::Count => show_error(
-                            "too many args, the time num must lower than 3",
+            Err(e) => match e {
+                nom::Err::Error(err) | nom::Err::Failure(err) => match err.source.code {
+                    nom::error::ErrorKind::Count => show_error(
+                        "too many args, the time num must lower than 3",
+                        &format!("from:{}:{}", err.offset, err.offset + err.length),
+                        from,
+                        err.offset,
+                        err.length,
+                        Some("too many args"),
+                    ),
+                    nom::error::ErrorKind::Tag => {
+                        let word = alpha1::<Span, nom::error::Error<Span>>(err.source.input)
+                            .map(|(_, word)| format!(": `{word}`"))
+                            .unwrap_or_default();
+                        show_error(
+                            &format!("invalid token{word}",),
                             &format!("from:{}:{}", err.offset, err.offset + err.length),
                             from,
-                            err.offset,
-                            err.length,
-                            Some("too many args"),
+                            err.offset + err.length,
+                            word.len().saturating_sub(4).max(1),
+                            Some("invalid token"),
+                        )
+                    }
+                    nom::error::ErrorKind::Escaped => show_error(
+                        &format!(
+                            "escaped operation: `{}`",
+                            from.chars().nth(err.offset).unwrap_or_default()
                         ),
-                        nom::error::ErrorKind::Tag => {
-                            let word = alpha1::<Span, nom::error::Error<Span>>(err.source.input).map(|(_, word)| format!(": `{word}`")).unwrap_or_default();
-                            show_error(
-                                &format!("invalid token{word}", ),
-                                &format!("from:{}:{}", err.offset, err.offset + err.length),
-                                from,
-                                err.offset + err.length,
-                                word.len() - 4,
-                                Some("invalid token"),
-                            )
-                        },
-                        _ => {}
-                    },
+                        &format!("from:{}:{}", err.offset, err.offset + err.length),
+                        from,
+                        err.offset,
+                        err.length,
+                        Some("escaped operation"),
+                    ),
                     _ => {}
-                }
-            }
+                },
+                _ => {}
+            },
             _ => {}
         }
         // show_error(
