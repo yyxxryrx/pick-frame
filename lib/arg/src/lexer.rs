@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
-type Span<'a> = nom_locate::LocatedSpan<&'a str>;
+pub type Span<'a> = nom_locate::LocatedSpan<&'a str>;
 
 trait Token {
     fn token(&self) -> &'static str;
@@ -95,8 +95,8 @@ pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
     loop {
         if i > 2 {
             return Err(nom::Err::Failure(nom::error::Error::new(
-                Span::new("Too many args"),
-                nom::error::ErrorKind::TooLarge,
+                input,
+                nom::error::ErrorKind::Count,
             )));
         }
         match tag::<&str, Span, nom::error::Error<Span>>(":")(input) {
@@ -121,8 +121,8 @@ pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
     let len = times.len();
     if len < 2 && ms.is_none() {
         return Err(nom::Err::Failure(nom::error::Error::new(
-            "only one number".into(),
-            nom::error::ErrorKind::Count,
+            input,
+            nom::error::ErrorKind::Fail,
         )));
     }
     let secs = times.iter().enumerate().fold(0u64, |acc, (index, value)| {
@@ -175,20 +175,69 @@ impl<T: Debug> DSLItem<T> {
     }
 }
 
-pub fn parse_item(input: Span) -> IResult<Span, Option<DSLItem<DSLType>>> {
-    let (input, _) = many0(tag(" ")).parse(input)?;
+fn map_err(
+    err: nom::Err<nom::error::Error<Span>>,
+    offset: usize,
+) -> nom::Err<error::ParseError<nom::error::Error<Span>>> {
+    match err {
+        nom::Err::Error(err) => nom::Err::Error(error::ParseError {
+            offset,
+            length: err.input.location_offset() - offset,
+            source: Box::new(err),
+        }),
+        nom::Err::Failure(err) => nom::Err::Failure(error::ParseError {
+            offset,
+            length: err.input.location_offset() - offset,
+            source: Box::new(err),
+        }),
+        nom::Err::Incomplete(need) => nom::Err::Incomplete(need),
+    }
+}
+
+fn map_err_build(
+    offset: usize,
+) -> Box<
+    dyn Fn(
+        nom::Err<nom::error::Error<Span>>,
+    ) -> nom::Err<error::ParseError<nom::error::Error<Span>>>,
+> {
+    Box::new(move |err| map_err(err, offset))
+}
+
+pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLType>>> {
+    let (input, _) = many0(tag(" "))
+        .parse(input)
+        .map_err(map_err_build(input.location_offset()))?;
     if input.is_empty() {
         return Ok((input, None));
     }
     let offset = input.location_offset();
+    match parse_timestamp2(input) {
+        Ok((input, item)) => {
+            return Ok((
+                input,
+                Some(DSLItem {
+                    offset,
+                    content: item,
+                    length: input.location_offset() - offset,
+                }),
+            ));
+        }
+        Err(e) => match e {
+            nom::Err::Failure(ref err) if err.code == nom::error::ErrorKind::Count => {
+                return Err(map_err(e, input.location_offset()));
+            }
+            _ => {}
+        },
+    }
     let (input, item) = alt((
-        parse_keyword,
         parse_frame_index,
         parse_timestamp1,
         parse_timestamp3,
-        parse_timestamp2,
+        parse_keyword,
     ))
-    .parse(input)?;
+    .parse(input)
+    .map_err(map_err_build(input.location_offset()))?;
     Ok((
         input,
         Some(DSLItem {
@@ -226,13 +275,17 @@ impl Token for DSLOp {
     }
 }
 
-pub fn parse_op(input: Span) -> IResult<Span, Option<DSLItem<DSLOp>>> {
-    let (input, _) = many0(tag(" ")).parse(input)?;
+pub fn parse_op(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLOp>>> {
+    let (input, _) = many0(tag(" "))
+        .parse(input)
+        .map_err(map_err_build(input.location_offset()))?;
     if input.is_empty() {
         return Ok((input, None));
     }
     let offset = input.location_offset();
-    let (input, op) = alt((_parse(DSLOp::Add), _parse(DSLOp::Sub))).parse(input)?;
+    let (input, op) = alt((_parse(DSLOp::Add), _parse(DSLOp::Sub)))
+        .parse(input)
+        .map_err(map_err_build(input.location_offset()))?;
     Ok((
         input,
         Some(DSLItem {
@@ -249,7 +302,7 @@ pub struct Expr {
     ops: Vec<DSLItem<DSLOp>>,
 }
 
-pub fn parse_expr(input: Span) -> IResult<Span, Expr> {
+pub fn parse_expr(input: Span) -> error::ParseExprResult<Span, Expr> {
     let (mut input, Some(item)) = parse_item(input)? else {
         return Ok((input, Expr::default()));
     };
@@ -368,6 +421,45 @@ pub fn check_expr(expr: &Expr) -> Result<(), String> {
         return Err("Too many keywords".to_string());
     }
     Ok(())
+}
+
+pub mod error {
+    use std::error::Error;
+    use std::fmt::Formatter;
+
+    pub type ParseExprResult<I, O, E = ParseError<nom::error::Error<I>>> =
+        Result<(I, O), nom::Err<E>>;
+
+    #[derive(Debug)]
+    pub struct ParseError<T>
+    where
+        T: Error + 'static,
+    {
+        pub offset: usize,
+        pub length: usize,
+        pub source: Box<T>,
+    }
+
+    impl<T> std::fmt::Display for ParseError<T>
+    where
+        T: Error + 'static,
+    {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "in 1:{}(length {}): {}",
+                self.offset, self.offset, self.source
+            )
+        }
+    }
+    impl<T> Error for ParseError<T>
+    where
+        T: Error + 'static,
+    {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(self.source.as_ref() as &(dyn Error + 'static))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -561,7 +653,7 @@ mod tests {
             DSLType::Timestamp(Duration::from_secs(245)),
         ];
         for (item, expr_item) in items.iter().zip(expr.items.iter()) {
-            assert_eq!(*item, expr_item.content);
+            assert_eq!(expr_item, item);
         }
         assert_eq!(
             expr.ops,
@@ -582,6 +674,19 @@ mod tests {
         // end + from - to + 1f - 246.997s
         let (_, mut expr) = parse_expr("end + from - to + 1f - 2s + 3ms - 4:5".into()).unwrap();
         optimize_expr(&mut expr);
-        println!("{expr:?}");
+        let items = vec![
+            DSLType::Keyword(DSLKeywords::End),
+            DSLType::Keyword(DSLKeywords::From),
+            DSLType::Keyword(DSLKeywords::To),
+            DSLType::FrameIndex(1),
+            DSLType::Timestamp(Duration::from_secs(247) - Duration::from_millis(3)),
+        ];
+        for (item, expr_item) in items.iter().zip(expr.items.iter()) {
+            assert_eq!(expr_item, item);
+        }
+        assert_eq!(
+            expr.ops,
+            vec![DSLOp::Add, DSLOp::Add, DSLOp::Sub, DSLOp::Add, DSLOp::Sub,]
+        );
     }
 }
