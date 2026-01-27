@@ -2,6 +2,7 @@ use nom::IResult;
 use nom::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
+use nom::character::complete::space1;
 use nom::character::complete::u64;
 use nom::multi::many0;
 use std::collections::HashMap;
@@ -219,7 +220,7 @@ fn map_err_build2(
 }
 
 pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLType>>> {
-    let (input, _) = many0(tag(" "))
+    let (input, _) = many0(space1)
         .parse(input)
         .map_err(map_err_build(input.location_offset()))?;
     if input.is_empty() {
@@ -293,7 +294,7 @@ impl Token for DSLOp {
 }
 
 pub fn parse_op(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLOp>>> {
-    let (input, _) = many0(tag(" ")).parse(input).map_err(map_err_build2(
+    let (input, _) = many0(space1).parse(input).map_err(map_err_build2(
         input.location_offset(),
         error::ParseErrorKind::Op,
     ))?;

@@ -1,4 +1,6 @@
+#[cfg(feature = "dsl")]
 mod lexer;
+#[cfg(feature = "dsl")]
 mod tui;
 
 use clap::Parser;
