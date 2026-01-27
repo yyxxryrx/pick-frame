@@ -7,12 +7,23 @@
 
 此工具通过使用 `avformat_seek_file` 跳转到目标帧来实现快速定位，因此通常具有较快的速度。
 
+还未完成的：
+
+> 当前还是开发中，语法随时会变，而且也不一定完全实现了所有的功能
+
+- 时间表达式，例如 `-10s + 1f` 这种，详细见 [lexer.rs](lib/arg/src/lexer.rs) 和 [tui.rs](lib/arg/src/tui.rs)
+- 硬件加速
+- 跨平台，而不仅限 Windows
+- 支持 **conan** 而不仅是 **vcpkg**
+
 ## 依赖项
 
 - zig
 - rust
 - vcpkg
 - ffmpeg
+
+如需查看具体依赖信息，请看 [详细依赖项](#详细依赖项)
 
 ## 下载
 
@@ -122,6 +133,16 @@ pick-frame.exe -i vidoe.mp4 -t 10s
 # pick frames from 01:10:10.100 to 01:10:20.200 to output directory
 pick-frame.exe -i video.mp4 -f 01:10:10.100 -t 01:10:20.200 output
 ```
+
+## 详细依赖项
+
+| 序号  | 依赖名称       | 被哪个语言依赖 | 是否可选 |
+|:--- | ---------- | ------- |:----:|
+| 1   | FFmpeg     | Zig     | 否    |
+| 2   | clap       | Rust    | 否    |
+| 3   | nom        | Rust    | 是    |
+| 4   | nom_locate | Rust    | 是    |
+| 5   | colored    | Rust    | 是    |
 
 ## 许可证
 
