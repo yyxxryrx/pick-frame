@@ -1,9 +1,9 @@
+use nom::IResult;
 use nom::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::u64;
 use nom::multi::many0;
-use nom::IResult;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -178,14 +178,17 @@ impl<T: Debug> DSLItem<T> {
 fn map_err(
     err: nom::Err<nom::error::Error<Span>>,
     offset: usize,
+    kind: error::ParseErrorKind,
 ) -> nom::Err<error::ParseError<nom::error::Error<Span>>> {
     match err {
         nom::Err::Error(err) => nom::Err::Error(error::ParseError {
+            kind,
             offset,
             length: err.input.location_offset() - offset,
             source: Box::new(err),
         }),
         nom::Err::Failure(err) => nom::Err::Failure(error::ParseError {
+            kind,
             offset,
             length: err.input.location_offset() - offset,
             source: Box::new(err),
@@ -201,7 +204,18 @@ fn map_err_build(
         nom::Err<nom::error::Error<Span>>,
     ) -> nom::Err<error::ParseError<nom::error::Error<Span>>>,
 > {
-    Box::new(move |err| map_err(err, offset))
+    Box::new(move |err| map_err(err, offset, error::ParseErrorKind::Nom))
+}
+
+fn map_err_build2(
+    offset: usize,
+    kind: error::ParseErrorKind,
+) -> Box<
+    dyn Fn(
+        nom::Err<nom::error::Error<Span>>,
+    ) -> nom::Err<error::ParseError<nom::error::Error<Span>>>,
+> {
+    Box::new(move |err| map_err(err, offset, kind))
 }
 
 pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLType>>> {
@@ -225,7 +239,7 @@ pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DS
         }
         Err(e) => match e {
             nom::Err::Failure(ref err) if err.code == nom::error::ErrorKind::Count => {
-                return Err(map_err(e, input.location_offset()));
+                return Err(map_err_build(input.location_offset())(e));
             }
             _ => {}
         },
@@ -238,7 +252,7 @@ pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DS
                 nom::Err::Error(err) if err.code == nom::error::ErrorKind::Digit => {
                     parse_keyword(input).map_err(map_err_build(input.location_offset()))?
                 }
-                _ => return Err(map_err(e, input.location_offset())),
+                _ => return Err(map_err_build(input.location_offset())(e)),
             },
         };
     Ok((
@@ -279,16 +293,20 @@ impl Token for DSLOp {
 }
 
 pub fn parse_op(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLOp>>> {
-    let (input, _) = many0(tag(" "))
-        .parse(input)
-        .map_err(map_err_build(input.location_offset()))?;
+    let (input, _) = many0(tag(" ")).parse(input).map_err(map_err_build2(
+        input.location_offset(),
+        error::ParseErrorKind::Op,
+    ))?;
     if input.is_empty() {
         return Ok((input, None));
     }
     let offset = input.location_offset();
     let (input, op) = alt((_parse(DSLOp::Add), _parse(DSLOp::Sub)))
         .parse(input)
-        .map_err(map_err_build(input.location_offset()))?;
+        .map_err(map_err_build2(
+            input.location_offset(),
+            error::ParseErrorKind::Op,
+        ))?;
     Ok((
         input,
         Some(DSLItem {
@@ -322,13 +340,9 @@ pub fn parse_expr(input: Span) -> error::ParseExprResult<Span, Expr> {
 
         let res = parse_item(input)?;
         let Some(item) = res.1 else {
-            return Err(map_err(
-                nom::Err::Failure(nom::error::Error::new(
-                    input,
-                    nom::error::ErrorKind::Escaped,
-                )),
-                offset,
-            ));
+            return Err(map_err_build(offset)(nom::Err::Failure(
+                nom::error::Error::new(input, nom::error::ErrorKind::Escaped),
+            )));
         };
         input = res.0;
         items.push(item);
@@ -346,7 +360,7 @@ macro_rules! get {
 }
 
 pub fn optimize_expr(expr: &mut Expr) {
-    if expr.items.len() < 3 {
+    if expr.items.len() < 2 {
         return;
     }
     expr.ops.insert(
@@ -361,7 +375,6 @@ pub fn optimize_expr(expr: &mut Expr) {
     let mut time_index: Option<usize> = None;
     let mut index = 0;
     while index < expr.items.len() {
-        println!("{expr:?}");
         match expr.items[index].content {
             DSLType::FrameIndex(this) => match frame_index {
                 Some(first_index) => {
@@ -438,6 +451,12 @@ pub mod error {
     use std::error::Error;
     use std::fmt::Formatter;
 
+    #[derive(Debug, Clone, Copy)]
+    pub enum ParseErrorKind {
+        Nom,
+        Op,
+    }
+
     pub type ParseExprResult<I, O, E = ParseError<nom::error::Error<I>>> =
         Result<(I, O), nom::Err<E>>;
 
@@ -449,6 +468,7 @@ pub mod error {
         pub offset: usize,
         pub length: usize,
         pub source: Box<T>,
+        pub kind: ParseErrorKind,
     }
 
     impl<T> std::fmt::Display for ParseError<T>
