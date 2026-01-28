@@ -11,10 +11,13 @@
 
 > 当前还是开发中，语法随时会变，而且也不一定完全实现了所有的功能
 
-- 时间表达式，例如 `-10s + 1f` 这种，详细见 [lexer.rs](lib/arg/src/lexer.rs) 和 [tui.rs](lib/arg/src/tui.rs)
 - 硬件加速
 - 跨平台，而不仅限 Windows
 - 支持 **conan** 而不仅是 **vcpkg**
+
+已经完成的：
+
+- 时间表达式，例如 `end - 10s + 1f` 这种，详细见 [lexer.rs](lib/arg/src/lexer.rs) 和 [tui.rs](lib/arg/src/tui.rs)
 
 ## 依赖项
 
@@ -95,6 +98,16 @@ zig build -Ddynamic-link=true --release=[mode]
 zig build -Ddynamic-link=true --release=fast
 ```
 
+### 3. 关于时间表达式
+
+如果要使用时间表达式，请在构建时加上 `-Denable-time-expr=true` 参数，例如
+
+```bash
+zig build -Denable-time-expr=true --release=fast
+```
+
+该选项默认为 `false`
+
 ## 使用
 
 ```bash
@@ -136,13 +149,13 @@ pick-frame.exe -i video.mp4 -f 01:10:10.100 -t 01:10:20.200 output
 
 ## 详细依赖项
 
-| 序号  | 依赖名称       | 被哪个语言依赖 | 是否可选 |
-|:--- | ---------- | ------- |:----:|
-| 1   | FFmpeg     | Zig     | 否    |
-| 2   | clap       | Rust    | 否    |
-| 3   | nom        | Rust    | 是    |
-| 4   | nom_locate | Rust    | 是    |
-| 5   | colored    | Rust    | 是    |
+| 序号 | 依赖名称   | 被哪个语言依赖 | 是否可选 |
+| :--- | ---------- | -------------- | :------: |
+| 1    | FFmpeg     | Zig            |    否    |
+| 2    | clap       | Rust           |    否    |
+| 3    | nom        | Rust           |    是    |
+| 4    | nom_locate | Rust           |    是    |
+| 5    | colored    | Rust           |    是    |
 
 ## 许可证
 
