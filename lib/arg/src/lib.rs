@@ -6,6 +6,70 @@ mod tui;
 use clap::Parser;
 use std::{ffi::CString, os::raw::c_char, time::Duration};
 
+const AV_NOPTS_VALUE: i64 = i64::MIN;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn create_video_info(
+    fps: f64,
+    time_base_den: i64,
+    time_base_num: i64,
+    start_time: i64,
+    duration: i64,
+) -> *mut VideoInfo {
+    Box::into_raw(Box::new(VideoInfo {
+        fps,
+        duration,
+        start_time,
+        time_base_den,
+        time_base_num,
+    }))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn free_video_info(info: *mut VideoInfo) {
+    if info.is_null() {
+        return;
+    }
+    unsafe {
+        let _ = Box::from_raw(info);
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct VideoInfo {
+    pub fps: f64,
+    pub time_base_den: i64,
+    pub time_base_num: i64,
+    pub start_time: i64,
+    pub duration: i64,
+}
+
+impl VideoInfo {
+    pub fn frame_to_timestamp(&self, frame_index: u64) -> i64 {
+        let seconds = frame_index as f64 / self.fps;
+        let tb_val = self.time_base_num as f64 / self.time_base_den as f64;
+        let mut target_ts = (seconds / tb_val) as i64;
+        if self.start_time != AV_NOPTS_VALUE {
+            target_ts += self.start_time;
+        }
+        target_ts
+    }
+
+    pub fn milliseconds_to_timestamp(&self, ms: u64) -> i64 {
+        let seconds = ms as f64 / 1000f64;
+        let tb_val = self.time_base_num as f64 / self.time_base_den as f64;
+        let mut target_ts = (seconds / tb_val) as i64;
+        if self.start_time != AV_NOPTS_VALUE {
+            target_ts += self.start_time;
+        }
+        target_ts
+    }
+
+    pub fn end_to_timestamp(&self) -> i64 {
+        self.duration
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub enum TimeTypeKind {
@@ -20,21 +84,26 @@ impl Default for TimeTypeKind {
     }
 }
 
-#[repr(C)]
 #[derive(Debug, Default)]
-pub struct TimeType {
+pub struct PaserTimeType {
     pub kind: TimeTypeKind,
     pub value: u64,
 }
 
-#[repr(C)]
-pub struct ArgParseResult {
+pub struct ArgParseResultContext {
     pub input: *const c_char,
     pub output: *const c_char,
-    pub start: TimeType,
-    pub end: TimeType,
     pub thread_count: u16,
     pub format: *const c_char,
+
+    start: TimeType,
+    end: TimeType,
+}
+
+enum TimeType {
+    Parser(PaserTimeType),
+    #[cfg(feature = "dsl")]
+    DSL(lexer::CheckedExpr),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,7 +172,7 @@ impl std::str::FromStr for Time {
     }
 }
 
-impl From<Time> for TimeType {
+impl From<Time> for PaserTimeType {
     fn from(value: Time) -> Self {
         match value {
             Time::Time(t) => Self {
@@ -119,6 +188,12 @@ impl From<Time> for TimeType {
                 value: 0,
             },
         }
+    }
+}
+
+impl From<Time> for TimeType {
+    fn from(value: Time) -> Self {
+        Self::Parser(value.into())
     }
 }
 
@@ -155,16 +230,36 @@ impl std::str::FromStr for ThreadCount {
     about = "A simple video frame picker\n\nTips:\n\t`xxx` is frame index\n\t`xx:xx.xx` is timestamp\n\t`end` is the end of video\n\t`xx.xxs` is seconds-base timestamp"
 )]
 struct Cli {
-    #[clap(short, long, help = "The video path")]
+    #[arg(short, long, help = "The video path")]
     input: String,
-    #[clap(
+    #[cfg(feature = "dsl")]
+    #[arg(
+        short,
+        long,
+        value_name = "expr",
+        help = "time expression",
+        default_value = "0"
+    )]
+    from: String,
+    #[cfg(not(feature = "dsl"))]
+    #[arg(
         short,
         long,
         help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]",
         default_value = "0"
     )]
     from: Time,
-    #[clap(
+    #[cfg(feature = "dsl")]
+    #[arg(
+        short,
+        long,
+        value_name = "expr",
+        help = "time expression",
+        default_value = "end"
+    )]
+    to: String,
+    #[cfg(not(feature = "dsl"))]
+    #[arg(
         short,
         long,
         help = "possible format: [xxx, xx.xxs, xx:xx.xx, end]",
@@ -180,14 +275,71 @@ struct Cli {
     thread_count: ThreadCount,
     #[arg(long, help = "filename format", default_value = "frame-%d.jpg")]
     format: String,
-    #[clap(help = "Output path", default_value = ".")]
+    #[arg(help = "Output path", default_value = ".")]
     output: String,
 }
 
+#[cfg(feature = "dsl")]
+macro_rules! err {
+    ($info:expr) => {{
+        println!("{} {}", "error:".bright_red(), $info);
+        std::process::exit(1);
+    }};
+    ($info:expr, $code:literal) => {{
+        use colored::Colorize;
+        println!("{} {}", "error:".bright_red(), $info);
+        std::process::exit($code);
+    }};
+}
+
 #[unsafe(no_mangle)]
-pub extern "C" fn parse() -> *mut ArgParseResult {
+pub extern "C" fn parse() -> *mut ArgParseResultContext {
     let cli = Cli::parse();
-    Box::into_raw(Box::new(ArgParseResult {
+    #[cfg(feature = "dsl")]
+    {
+        let (_, mut from_expr) = tui::handle_error(
+            &cli.from,
+            "from",
+            lexer::parse_expr(cli.from.as_str().into()),
+        );
+        lexer::optimize_expr(&mut from_expr);
+        let from_expr = lexer::check_expr(&from_expr)
+            .map_err(|err| err!(err, 2))
+            .unwrap();
+
+        let (_, mut to_expr) =
+            tui::handle_error(&cli.to, "to", lexer::parse_expr(cli.to.as_str().into()));
+        lexer::optimize_expr(&mut to_expr);
+        let to_expr = lexer::check_expr(&to_expr)
+            .map_err(|err| err!(err, 2))
+            .unwrap();
+
+        let ref_to = from_expr.items.iter().any(|item| match item {
+            lexer::DSLType::Keyword(lexer::DSLKeywords::To) => true,
+            _ => false,
+        });
+        let ref_from = to_expr.items.iter().any(|item| match item {
+            lexer::DSLType::Keyword(lexer::DSLKeywords::From) => true,
+            _ => false,
+        });
+        if ref_from && ref_to {
+            err!(
+                "circular references, arg from ref `to` and arg to ref `from`".bright_white(),
+                2
+            );
+        }
+
+        Box::into_raw(Box::new(ArgParseResultContext {
+            input: CString::new(cli.input).unwrap_or_default().into_raw(),
+            output: CString::new(cli.output).unwrap_or_default().into_raw(),
+            format: CString::new(cli.format).unwrap_or_default().into_raw(),
+            thread_count: cli.thread_count.into(),
+            start: TimeType::DSL(from_expr),
+            end: TimeType::DSL(to_expr),
+        }))
+    }
+    #[cfg(not(feature = "dsl"))]
+    Box::into_raw(Box::new(ArgParseResultContext {
         input: CString::new(cli.input).unwrap_or_default().into_raw(),
         output: CString::new(cli.output).unwrap_or_default().into_raw(),
         start: cli.from.into(),
@@ -198,11 +350,105 @@ pub extern "C" fn parse() -> *mut ArgParseResult {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn free_parse(p_res: *mut ArgParseResult) {
-    if p_res.is_null() {
+pub extern "C" fn get_input(res_ctx: &ArgParseResultContext) -> *const c_char {
+    res_ctx.input
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_output(res_ctx: &ArgParseResultContext) -> *const c_char {
+    res_ctx.output
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_thread_count(res_ctx: &ArgParseResultContext) -> u16 {
+    res_ctx.thread_count
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_format(res_ctx: &ArgParseResultContext) -> *const c_char {
+    res_ctx.format
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_from_timestamp(res_ctx: &ArgParseResultContext, info: &VideoInfo) -> i64 {
+    match res_ctx.start {
+        TimeType::Parser(ref per) => match per.kind {
+            TimeTypeKind::End => info.end_to_timestamp(),
+            TimeTypeKind::Frame => info.frame_to_timestamp(per.value),
+            TimeTypeKind::Millisecond => info.milliseconds_to_timestamp(per.value),
+        },
+        #[cfg(feature = "dsl")]
+        TimeType::DSL(ref expr) => {
+            let mut pts = 0i64;
+            for (op, item) in expr.ops.iter().zip(expr.items.iter()) {
+                let item = match item {
+                    lexer::DSLType::Keyword(keyword) => match keyword {
+                        lexer::DSLKeywords::To => get_to_timestamp(res_ctx, info),
+                        lexer::DSLKeywords::End => info.end_to_timestamp(),
+                        _ => unreachable!(),
+                    },
+                    lexer::DSLType::FrameIndex(index) => info.frame_to_timestamp(*index),
+                    lexer::DSLType::Timestamp(dur) => {
+                        info.milliseconds_to_timestamp(dur.as_millis() as u64)
+                    }
+                };
+                match op {
+                    lexer::DSLOp::Add => {
+                        pts += item;
+                    }
+                    lexer::DSLOp::Sub => {
+                        pts -= item;
+                    }
+                }
+            }
+            pts
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_to_timestamp(res_ctx: &ArgParseResultContext, info: &VideoInfo) -> i64 {
+    match res_ctx.end {
+        TimeType::Parser(ref per) => match per.kind {
+            TimeTypeKind::End => info.end_to_timestamp(),
+            TimeTypeKind::Frame => info.frame_to_timestamp(per.value),
+            TimeTypeKind::Millisecond => info.milliseconds_to_timestamp(per.value),
+        },
+        #[cfg(feature = "dsl")]
+        TimeType::DSL(ref expr) => {
+            let mut pts = 0i64;
+            for (op, item) in expr.ops.iter().zip(expr.items.iter()) {
+                let item = match item {
+                    lexer::DSLType::Keyword(keyword) => match keyword {
+                        lexer::DSLKeywords::From => get_from_timestamp(res_ctx, info),
+                        lexer::DSLKeywords::End => info.end_to_timestamp(),
+                        _ => unreachable!(),
+                    },
+                    lexer::DSLType::FrameIndex(index) => info.frame_to_timestamp(*index),
+                    lexer::DSLType::Timestamp(dur) => {
+                        info.milliseconds_to_timestamp(dur.as_millis() as u64)
+                    }
+                };
+                match op {
+                    lexer::DSLOp::Add => {
+                        pts += item;
+                    }
+                    lexer::DSLOp::Sub => {
+                        pts -= item;
+                    }
+                }
+            }
+            pts
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn free_parse(res_ctx: *mut ArgParseResultContext) {
+    if res_ctx.is_null() {
         return;
     }
     unsafe {
-        _ = Box::from_raw(p_res);
+        _ = Box::from_raw(res_ctx);
     }
 }

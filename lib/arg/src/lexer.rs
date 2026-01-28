@@ -152,6 +152,7 @@ pub fn parse_timestamp3(input: Span) -> IResult<Span, DSLType> {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct DSLItem<T: Debug> {
     pub content: T,
     pub offset: usize,
@@ -320,8 +321,8 @@ pub fn parse_op(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLO
 
 #[derive(Debug, Default)]
 pub struct Expr {
-    items: Vec<DSLItem<DSLType>>,
-    ops: Vec<DSLItem<DSLOp>>,
+    pub items: Vec<DSLItem<DSLType>>,
+    pub ops: Vec<DSLItem<DSLOp>>,
 }
 
 pub fn parse_expr(input: Span) -> error::ParseExprResult<Span, Expr> {
@@ -361,17 +362,17 @@ macro_rules! get {
 }
 
 pub fn optimize_expr(expr: &mut Expr) {
-    if expr.items.len() < 2 {
-        return;
-    }
     expr.ops.insert(
-        1,
+        0,
         DSLItem {
             content: DSLOp::Add,
             offset: 0,
             length: 0,
         },
     );
+    if expr.items.len() < 2 {
+        return;
+    }
     let mut frame_index: Option<usize> = None;
     let mut time_index: Option<usize> = None;
     let mut index = 0;
@@ -421,7 +422,13 @@ pub fn optimize_expr(expr: &mut Expr) {
     }
 }
 
-pub fn check_expr(expr: &Expr) -> Result<(), String> {
+#[derive(Debug)]
+pub struct CheckedExpr {
+    pub items: Vec<DSLType>,
+    pub ops: Vec<DSLOp>,
+}
+
+pub fn check_expr(expr: &Expr) -> Result<CheckedExpr, String> {
     let mut counter = HashMap::<DSLKeywords, isize>::new();
     let mut has_add = false;
     for (item, op) in expr.items.iter().zip(expr.ops.iter()) {
@@ -439,13 +446,23 @@ pub fn check_expr(expr: &Expr) -> Result<(), String> {
             has_add = true;
         }
     }
-    if !has_add {
+    if !has_add && !expr.ops.is_empty() {
         return Err("Overflow: all is sub".to_string());
     }
     if counter.values().any(|v| v.abs() > 1) {
         return Err("Too many keywords".to_string());
     }
-    Ok(())
+    if counter.contains_key(&DSLKeywords::From) && counter.contains_key(&DSLKeywords::To) {
+        return Err("circular references".to_string());
+    }
+    Ok(CheckedExpr {
+        items: expr
+            .items
+            .iter()
+            .map(|item| item.content.clone())
+            .collect::<_>(),
+        ops: expr.ops.iter().map(|item| item.content).collect::<_>(),
+    })
 }
 
 pub mod error {
@@ -464,7 +481,7 @@ pub mod error {
     #[derive(Debug)]
     pub struct ParseError<T>
     where
-        T: Error + 'static,
+        T: Error,
     {
         pub offset: usize,
         pub length: usize,
@@ -474,7 +491,7 @@ pub mod error {
 
     impl<T> std::fmt::Display for ParseError<T>
     where
-        T: Error + 'static,
+        T: Error,
     {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
             write!(
@@ -486,11 +503,8 @@ pub mod error {
     }
     impl<T> Error for ParseError<T>
     where
-        T: Error + 'static,
+        T: Error,
     {
-        fn source(&self) -> Option<&(dyn Error + 'static)> {
-            Some(self.source.as_ref() as &(dyn Error + 'static))
-        }
     }
 }
 

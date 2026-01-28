@@ -20,6 +20,7 @@ pub fn show_error(
         "^".repeat(length).bright_red(),
         tips.unwrap_or_default().bright_red()
     );
+    println!();
 }
 
 pub fn handle_error<'a>(

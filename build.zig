@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const allocator = std.heap.page_allocator;
     // zig fmt: off
     const target = b.standardTargetOptions(.{
         .default_target = .{
@@ -10,7 +11,10 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    const cargo_build = b.addSystemCommand(switch (b.release_mode) {
+    var cargo_args = std.ArrayList([]const u8).empty;
+    defer cargo_args.deinit(allocator);
+
+    cargo_args.appendSlice(allocator, switch (b.release_mode) {
         .off => &. {
             "cargo", "build"
         },
@@ -23,7 +27,16 @@ pub fn build(b: *std.Build) void {
         else => &.{
             "cargo", "build", "--release"
         }
-    });
+    }) catch @panic("err");
+
+    const use_dsl = b.option(bool, "enable-time-expr", "enable time expr") orelse false;
+    
+    if (use_dsl) {
+        cargo_args.append(allocator, "--features") catch @panic("err");
+        cargo_args.append(allocator, "dsl") catch @panic("err");
+    }
+
+    const cargo_build = b.addSystemCommand(cargo_args.items);
     cargo_build.setCwd(b.path("lib/arg/"));
 
     const exe = b.addExecutable(.{
