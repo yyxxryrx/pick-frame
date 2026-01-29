@@ -118,15 +118,13 @@ pub fn handle_error<'a>(
                             None
                         };
                         let word = word.map(|word| format!(": `{word}`")).unwrap_or_default();
+                        let msg = if err.kind == ParseErrorKind::Keywords {
+                            "unknown keyword"
+                        } else {
+                            "invalid token"
+                        };
                         show_error(
-                            &format!(
-                                "{}{word}",
-                                if err.kind == ParseErrorKind::Keywords {
-                                    "unknown keyword"
-                                } else {
-                                    "invalid token"
-                                }
-                            ),
+                            &format!("{msg}{word}"),
                             &format!(
                                 "{content_type}:{}:{}",
                                 err.source.input.location_line(),
@@ -135,7 +133,7 @@ pub fn handle_error<'a>(
                             content,
                             err.offset + err.length,
                             word.len().saturating_sub(4).max(1),
-                            Some("invalid token"),
+                            Some(msg),
                             help.as_ref(),
                         );
                     }
