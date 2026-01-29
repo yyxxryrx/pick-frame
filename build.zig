@@ -2,10 +2,11 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const allocator = std.heap.page_allocator;
+    const os = @import("builtin").os;
     // zig fmt: off
     const target = b.standardTargetOptions(.{
         .default_target = .{
-            .abi = null
+            .abi = if (os.tag == .windows) .msvc else null
         }
     });
 
@@ -49,9 +50,9 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.is_linking_libc = true;
-    // exe.bundle_ubsan_rt = false;
-    // exe.bundle_compiler_rt = false;
-    exe.root_module.link_libcpp = true;
+    exe.bundle_ubsan_rt = false;
+    exe.bundle_compiler_rt = false;
+    exe.root_module.link_libcpp = os.tag != .windows;
 
     const target_name = switch (b.release_mode) {
         .off => "debug",
@@ -78,8 +79,8 @@ pub fn build(b: *std.Build) void {
         });
 
         // const triplet = if (is_dynamic) "x64-windows" else "x64-windows-static";
-        const triplet = b.option([]const u8, "triplet", "vcpkg installed triplet") orelse (switch (@import("builtin").os.tag) {
-            .windows => "x64-windows",
+        const triplet = b.option([]const u8, "triplet", "vcpkg installed triplet") orelse (switch (os.tag) {
+            .windows => if (is_dynamic) "x64-windows" else "x64-windows-static",
             .linux => "x64-linux",
             .macos => if (@import("builtin").cpu.arch.isArm()) "arm64-osx" else "x64-osx",
             else => @panic("unsupported system")
@@ -99,14 +100,18 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("swscale", .{.preferred_link_mode = link_mode});
     exe.root_module.linkSystemLibrary("avutil", .{.preferred_link_mode = link_mode});
 
-    exe.root_module.linkSystemLibrary("x264", .{.preferred_link_mode = link_mode}); // 如果你刚才安装了 [x264]
+    if (os.tag == .windows) {
+        exe.root_module.linkSystemLibrary("libx264", .{.preferred_link_mode = link_mode}); // 如果你刚才安装了 [x264]
+    } else {
+        exe.root_module.linkSystemLibrary("x264", .{.preferred_link_mode = link_mode});
+    }
 
     if (!is_dynamic) {
         exe.root_module.linkSystemLibrary("zlib", .{.preferred_link_mode = link_mode});
         exe.root_module.linkSystemLibrary("bz2", .{.preferred_link_mode = link_mode});     // 有时候 avformat 需要
     }
 
-    if (@import("builtin").os.tag == .windows) {
+    if (os.tag == .windows) {
         exe.root_module.linkSystemLibrary("ws2_32", .{});  // 网络 socket
         exe.root_module.linkSystemLibrary("bcrypt", .{});  // 加密
         exe.root_module.linkSystemLibrary("secur32", .{}); // 安全

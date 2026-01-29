@@ -5,6 +5,8 @@ const std = @import("std");
 const err = @import("error.zig");
 const util = @import("util.zig");
 
+const ty = if (@import("builtin").os.tag == .windows) c_int else c_uint;
+
 /// ToImage 结构体用于将视频帧转换为图像文件
 /// 包含编码器、编解码器上下文和图像缩放上下文
 pub const ToImage = struct {
@@ -25,7 +27,7 @@ pub const ToImage = struct {
     ///   - ToImage: 成功时返回初始化的ToImage实例
     ///   - 错误: 失败时返回相应的错误码
     pub fn init(width: c_int, height: c_int, src_format: av.AVPixelFormat, args: struct {
-        encoder: c_uint = av.AV_CODEC_ID_MJPEG,
+        encoder: ty = av.AV_CODEC_ID_MJPEG,
         format: c_int = av.AV_PIX_FMT_YUVJ420P,
     }) !ToImage {
         // 查找指定的编码器
