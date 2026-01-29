@@ -1,12 +1,12 @@
 //! # DSL词法分析器
-//! 
+//!
 //! 这个模块提供了一个用于解析特定领域语言（DSL）的词法分析器。
 //! DSL语言支持以下元素：
 //! - 关键字（end, from, to）
 //! - 帧索引（如 100f）
 //! - 时间戳（如 100s, 1:2:3, 100ms）
 //! - 操作符（+, -）
-//! 
+//!
 //! 该分析器使用nom库进行解析，并包含表达式优化和验证功能。
 
 use nom::IResult;
@@ -29,7 +29,7 @@ trait Token {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 /// DSL中的关键字枚举
-/// 
+///
 /// 支持的关键字包括:
 /// - `End`: 表示结束
 /// - `From`: 表示起始
@@ -55,10 +55,10 @@ impl Token for DSLKeywords {
 }
 
 /// 创建一个解析指定标记的解析器函数
-/// 
+///
 /// # 参数
 /// * `token` - 需要解析的标记
-/// 
+///
 /// # 返回值
 /// 返回一个解析函数，该函数尝试匹配输入中的标记
 fn _parse<T>(token: T) -> Box<dyn Fn(Span) -> IResult<Span, T>>
@@ -73,7 +73,7 @@ where
 
 #[derive(Debug, Clone, PartialEq)]
 /// DSL中支持的数据类型枚举
-/// 
+///
 /// 包括帧索引、时间戳和关键字三种基本类型
 pub enum DSLType {
     /// 帧索引，以f结尾，例如 100f
@@ -85,10 +85,10 @@ pub enum DSLType {
 }
 
 /// 解析DSL中的关键字
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的关键字
 pub fn parse_keyword(input: Span) -> IResult<Span, DSLType> {
@@ -102,12 +102,12 @@ pub fn parse_keyword(input: Span) -> IResult<Span, DSLType> {
 }
 
 /// 解析帧索引
-/// 
+///
 /// 帧索引格式为数字后跟字母f，例如 100f
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的帧索引
 pub fn parse_frame_index(input: Span) -> IResult<Span, DSLType> {
@@ -116,12 +116,12 @@ pub fn parse_frame_index(input: Span) -> IResult<Span, DSLType> {
 }
 
 /// 解析浮点数
-/// 
+///
 /// 尝试解析整数或小数形式的数值
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的f64值
 fn parse_f64(input: Span) -> IResult<Span, f64> {
@@ -141,12 +141,12 @@ fn parse_f64(input: Span) -> IResult<Span, f64> {
 }
 
 /// 解析秒级时间戳
-/// 
+///
 /// 格式为数字后跟字母s，例如 100s 或 100.5s
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的时间戳
 pub fn parse_timestamp1(input: Span) -> IResult<Span, DSLType> {
@@ -158,12 +158,12 @@ pub fn parse_timestamp1(input: Span) -> IResult<Span, DSLType> {
 }
 
 /// 解析时:分:秒格式的时间戳
-/// 
+///
 /// 支持格式如: 1:2, 1:2:3, 1:2.5 等
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的时间戳
 pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
@@ -222,12 +222,12 @@ pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
 }
 
 /// 解析毫秒级时间戳
-/// 
+///
 /// 格式为数字后跟ms，例如 100ms
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的时间戳
 pub fn parse_timestamp3(input: Span) -> IResult<Span, DSLType> {
@@ -241,7 +241,7 @@ pub fn parse_timestamp3(input: Span) -> IResult<Span, DSLType> {
 #[derive(Debug)]
 #[allow(unused)]
 /// 表示DSL中的一个项目，包含内容、偏移量和长度信息
-/// 
+///
 /// 泛型参数T代表项目的实际内容类型
 pub struct DSLItem<T: Debug> {
     /// 项目的实际内容
@@ -268,7 +268,7 @@ impl<T: Debug + PartialEq> PartialEq<T> for DSLItem<T> {
 
 impl<T: Debug> DSLItem<T> {
     /// 设置DSLItem的内容
-    /// 
+    ///
     /// # 参数
     /// * `content` - 新的内容
     pub fn set(&mut self, content: T) {
@@ -277,12 +277,12 @@ impl<T: Debug> DSLItem<T> {
 }
 
 /// 将nom错误转换为自定义解析错误
-/// 
+///
 /// # 参数
 /// * `err` - 原始的nom错误
 /// * `offset` - 错误发生的位置偏移
 /// * `kind` - 错误类型
-/// 
+///
 /// # 返回值
 /// 转换后的自定义解析错误
 fn map_err(
@@ -308,10 +308,10 @@ fn map_err(
 }
 
 /// 创建一个错误映射函数，用于将nom错误转换为自定义错误
-/// 
+///
 /// # 参数
 /// * `offset` - 错误发生的位置偏移
-/// 
+///
 /// # 返回值
 /// 返回一个错误转换函数
 fn map_err_build(
@@ -325,11 +325,11 @@ fn map_err_build(
 }
 
 /// 创建一个错误映射函数，用于将nom错误转换为指定类型的自定义错误
-/// 
+///
 /// # 参数
 /// * `offset` - 错误发生的位置偏移
 /// * `kind` - 错误类型
-/// 
+///
 /// # 返回值
 /// 返回一个错误转换函数
 fn map_err_build2(
@@ -344,12 +344,12 @@ fn map_err_build2(
 }
 
 /// 解析单个DSL项
-/// 
+///
 /// 尝试解析各种类型的DSL项，包括关键字、帧索引和时间戳
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的DSL项（如果存在）
 pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLType>>> {
@@ -384,7 +384,10 @@ pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DS
             Ok(res) => res,
             Err(e) => match e {
                 nom::Err::Error(err) if err.code == nom::error::ErrorKind::Digit => {
-                    parse_keyword(input).map_err(map_err_build(input.location_offset()))?
+                    parse_keyword(input).map_err(map_err_build2(
+                        input.location_offset(),
+                        error::ParseErrorKind::Keywords,
+                    ))?
                 }
                 _ => return Err(map_err_build(input.location_offset())(e)),
             },
@@ -401,7 +404,7 @@ pub fn parse_item(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DS
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// DSL中的操作符枚举
-/// 
+///
 /// 支持加法和减法两种操作符
 pub enum DSLOp {
     /// 加法操作符 (+)
@@ -412,7 +415,7 @@ pub enum DSLOp {
 
 impl DSLOp {
     /// 获取相反的操作符
-    /// 
+    ///
     /// # 返回值
     /// 如果当前是Add则返回Sub，如果是Sub则返回Add
     fn reversed(&self) -> Self {
@@ -438,12 +441,12 @@ impl Token for DSLOp {
 }
 
 /// 解析DSL中的操作符
-/// 
+///
 /// 尝试解析加法(+)或减法(-)操作符
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的操作符（如果存在）
 pub fn parse_op(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLOp>>> {
@@ -473,7 +476,7 @@ pub fn parse_op(input: Span) -> error::ParseExprResult<Span, Option<DSLItem<DSLO
 
 #[derive(Debug, Default)]
 /// 表示完整的DSL表达式
-/// 
+///
 /// 包含项列表和操作符列表
 pub struct Expr {
     /// 表达式中的项列表
@@ -483,12 +486,12 @@ pub struct Expr {
 }
 
 /// 解析完整的DSL表达式
-/// 
+///
 /// 表达式由项和操作符交替组成，例如: end + from - 100f + 5s
-/// 
+///
 /// # 参数
 /// * `input` - 输入的span
-/// 
+///
 /// # 返回值
 /// 返回解析结果，包含剩余输入和解析出的表达式
 pub fn parse_expr(input: Span) -> error::ParseExprResult<Span, Expr> {
@@ -519,9 +522,9 @@ pub fn parse_expr(input: Span) -> error::ParseExprResult<Span, Expr> {
 }
 
 /// 安全地从枚举中提取值的宏
-/// 
+///
 /// 假设输入值一定是指定的变体，否则会导致未定义行为
-/// 
+///
 /// # 参数
 /// * `$($name:ident)::` - 枚举变体的路径
 /// * `$val:expr` - 要提取值的表达式
@@ -535,9 +538,9 @@ macro_rules! get {
 }
 
 /// 优化DSL表达式
-/// 
+///
 /// 合并相同类型的项（帧索引与帧索引，时间戳与时间戳），简化表达式
-/// 
+///
 /// # 参数
 /// * `expr` - 需要优化的表达式引用
 pub fn optimize_expr(expr: &mut Expr) {
@@ -603,7 +606,7 @@ pub fn optimize_expr(expr: &mut Expr) {
 
 #[derive(Debug)]
 /// 经过验证的DSL表达式
-/// 
+///
 /// 仅包含类型，不包含位置信息
 pub struct CheckedExpr {
     /// 表达式中的项列表
@@ -613,12 +616,12 @@ pub struct CheckedExpr {
 }
 
 /// 验证DSL表达式的语义正确性
-/// 
+///
 /// 检查表达式是否符合语义规则，例如关键字的使用次数等
-/// 
+///
 /// # 参数
 /// * `expr` - 需要验证的表达式引用
-/// 
+///
 /// # 返回值
 /// 验证成功返回CheckedExpr，失败返回错误信息
 pub fn check_expr(expr: &Expr) -> Result<CheckedExpr, String> {
@@ -659,19 +662,21 @@ pub fn check_expr(expr: &Expr) -> Result<CheckedExpr, String> {
 }
 
 /// 解析错误处理模块
-/// 
+///
 /// 提供了自定义的解析错误类型和相关工具
 pub mod error {
     use std::error::Error;
     use std::fmt::Formatter;
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     /// 解析错误的种类
     pub enum ParseErrorKind {
         /// 来自nom库的基本解析错误
         Nom,
         /// 操作符相关的解析错误
         Op,
+        /// 关键字相关的解析错误
+        Keywords,
     }
 
     /// 解析表达式的返回类型
@@ -680,7 +685,7 @@ pub mod error {
 
     #[derive(Debug)]
     /// 自定义解析错误类型
-    /// 
+    ///
     /// 包含错误位置信息和原始错误
     pub struct ParseError<T>
     where
@@ -709,11 +714,7 @@ pub mod error {
             )
         }
     }
-    impl<T> Error for ParseError<T>
-    where
-        T: Error,
-    {
-    }
+    impl<T> Error for ParseError<T> where T: Error {}
 }
 
 #[cfg(test)]
