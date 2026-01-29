@@ -25,7 +25,7 @@ pub const ToImage = struct {
     ///   - ToImage: 成功时返回初始化的ToImage实例
     ///   - 错误: 失败时返回相应的错误码
     pub fn init(width: c_int, height: c_int, src_format: av.AVPixelFormat, args: struct {
-        encoder: c_int = av.AV_CODEC_ID_MJPEG,
+        encoder: c_uint = av.AV_CODEC_ID_MJPEG,
         format: c_int = av.AV_PIX_FMT_YUVJ420P,
     }) !ToImage {
         // 查找指定的编码器

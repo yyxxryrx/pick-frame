@@ -12,12 +12,12 @@
 > 当前还是开发中，语法随时会变，而且也不一定完全实现了所有的功能
 
 - 硬件加速
-- 跨平台，而不仅限 Windows
 - 支持 **conan** 而不仅是 **vcpkg**
 
 已经完成的：
 
 - 时间表达式，例如 `end - 10s + 1f` 这种，详细见 [lexer.rs](lib/arg/src/lexer.rs) 和 [tui.rs](lib/arg/src/tui.rs)
+- 跨平台，而不仅限 Windows
 
 ## 依赖项
 
@@ -139,6 +139,20 @@ zig build -Denable-time-expr=true --release=fast
 不支持隐式关键词，例如：`-10s` 不等价 `end - 10s`，会报错
 
 因为不清楚 `-10s` 是 `end - 10s` 还是 `to - 10s` 还是 `from - 10s`，所以需要手动加上关键字
+
+### 4. 使用系统FFmpeg库
+
+> 使用此方法构建无须 **vcpkg** 和 `VCPKG_ROOT` 环境变量
+
+首先确保你已在系统里安装的 **FFmpeg** 和 **pkg-config**
+
+然后运行
+
+```bash
+zig build -Duse-system=true
+```
+
+进行构建，其他选项同上
 
 ## 使用
 
