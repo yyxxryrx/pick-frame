@@ -1,21 +1,22 @@
-sync_to_github:
-    stage: deploy
-    image: alpine:latest
-    only:
-        - main # 监听的主分支
-    script:
-        - apk add --no-cache git openssh-client
+# 没 Runner
+# sync_to_github:
+#     stage: deploy
+#     image: alpine:latest
+#     only:
+#         - main # 监听的主分支
+#     script:
+#         - apk add --no-cache git openssh-client
 
-        # 配置 Git 用户信息
-        - git config --global user.name "GitLab CI"
-        - git config --global user.email "ci@gitlab.com"
+#         # 配置 Git 用户信息
+#         - git config --global user.name "GitLab CI"
+#         - git config --global user.email "ci@gitlab.com"
 
-        # 添加 GitHub 远程仓库 (注意使用 token 认证)
-        - git remote add github https://oauth2:${GITHUB_TOKEN}@github.com/yyxxryrx/pick-frame.git
+#         # 添加 GitHub 远程仓库 (注意使用 token 认证)
+#         - git remote add github https://oauth2:${GITHUB_TOKEN}@github.com/yyxxryrx/pick-frame.git
 
-        # 拉取当前代码（确保是最新的）
-        - git fetch origin main
-        - git checkout main
+#         # 拉取当前代码（确保是最新的）
+#         - git fetch origin main
+#         - git checkout main
 
-        # 推送到 GitHub
-        - git push github HEAD:main --force --tags
+#         # 推送到 GitHub
+#         - git push github HEAD:main --force --tags
