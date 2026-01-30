@@ -2,6 +2,7 @@
 
 [![Source](https://img.shields.io/badge/Source-GitHub-blue?logo=github)](https://github.com/yyxxryrx/pick-frame)
 [![MIT License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Mirror](https://img.shields.io/badge/Mirror-GitLab-orange?logo=gitlab)](https://gitlab.com/yyxxryrx/pick-frame)
 
 一个简单的视频帧提取工具
 
