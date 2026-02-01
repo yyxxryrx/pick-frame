@@ -5,8 +5,6 @@ sync_to_github:
     only:
         - main # 监听的主分支
     script:
-        - apk add --no-cache git openssh-client
-
         # 配置 Git 用户信息
         - git config --global user.name "GitLab CI"
         - git config --global user.email "ci@gitlab.com"
