@@ -1,7 +1,7 @@
 sync_to_github:
     stage: deploy
     tags:
-        - docker
+        - my-runner
     only:
         - main # 监听的主分支
     script:
