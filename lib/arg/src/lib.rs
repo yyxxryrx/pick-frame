@@ -48,7 +48,7 @@ impl VideoInfo {
     pub fn frame_to_timestamp(&self, frame_index: u64) -> i64 {
         let seconds = frame_index as f64 / self.fps;
         let tb_val = self.time_base_num as f64 / self.time_base_den as f64;
-        let mut target_ts = (seconds / tb_val) as i64;
+        let mut target_ts = (seconds / tb_val).ceil() as i64;
         if self.start_time != AV_NOPTS_VALUE {
             target_ts += self.start_time;
         }
@@ -58,7 +58,7 @@ impl VideoInfo {
     pub fn milliseconds_to_timestamp(&self, ms: u64) -> i64 {
         let seconds = ms as f64 / 1000f64;
         let tb_val = self.time_base_num as f64 / self.time_base_den as f64;
-        let mut target_ts = (seconds / tb_val) as i64;
+        let mut target_ts = (seconds / tb_val).ceil() as i64;
         if self.start_time != AV_NOPTS_VALUE {
             target_ts += self.start_time;
         }
@@ -238,7 +238,7 @@ struct Cli {
         long,
         value_name = "expr",
         help = "time expression",
-        default_value = "0"
+        default_value = "0f"
     )]
     from: String,
     #[cfg(not(feature = "dsl"))]

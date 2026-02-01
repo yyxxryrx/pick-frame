@@ -128,7 +128,7 @@ fn parse_f64(input: Span) -> IResult<Span, f64> {
     let (input, integer) = u64(input)?;
     match tag::<&str, Span, nom::error::Error<Span>>(".")(input) {
         Ok((input, _)) => {
-            let (input, decimal) = u64(input)?;
+            let (input, decimal) = nom::character::complete::digit1(input)?;
             Ok((
                 input,
                 format!("{integer}.{decimal}")
@@ -190,15 +190,28 @@ pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
                 let Ok(res) = tag::<&str, Span, nom::error::Error<Span>>(".")(input) else {
                     break;
                 };
-                let res = u64(res.0)?;
+                let res = nom::character::complete::digit1(res.0)?;
                 input = res.0;
-                ms = Some(res.1);
+                println!(
+                    "{}{}",
+                    res.1,
+                    "0".repeat(3usize.saturating_sub(res.1.len()))
+                );
+                ms = format!(
+                    "{}{}",
+                    res.1,
+                    "0".repeat(3usize.saturating_sub(res.1.len()))
+                )
+                .parse::<u64>()
+                .map(Some)
+                .unwrap_or_default();
+                println!("ms: {ms:?}");
                 break;
             }
         }
     }
     let len = times.len();
-    if len < 2 && ms.is_none() {
+    if len < 2 {
         return Err(nom::Err::Failure(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Fail,
@@ -208,16 +221,7 @@ pub fn parse_timestamp2(input: Span) -> IResult<Span, DSLType> {
         acc + *value * 60u64.pow((len - index - 1) as u32)
     });
     let sec = Duration::from_secs(secs);
-    let time = sec
-        + ms.map(|ms| {
-            let bit = ms.ilog10() + 1;
-            match bit.checked_sub(3) {
-                Some(0) => Duration::from_millis(ms),
-                None => Duration::from_millis(ms * 10u64.pow(3 - bit)),
-                Some(v) => Duration::from_millis((ms as f64 / 10f64.powi(v as i32)).round() as u64),
-            }
-        })
-        .unwrap_or_default();
+    let time = sec + ms.map(Duration::from_millis).unwrap_or_default();
     Ok((input, DSLType::Timestamp(time)))
 }
 
