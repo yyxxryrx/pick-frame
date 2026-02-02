@@ -56,6 +56,8 @@ pub fn build(b: *std.Build) void {
 
     const target_name = switch (b.release_mode) {
         .off => "debug",
+        .small => "release-small",
+        .safe => "release-safe",
         else => "release"
     };
 

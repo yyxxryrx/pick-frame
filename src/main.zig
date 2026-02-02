@@ -17,7 +17,12 @@ const video_reader = @import("read_video_frame.zig");
 //     break :blk @as(u16, @intCast(ci.PATH_MAX));
 // };
 
-const PATH_MAX: usize = 260;
+const PATH_MAX: usize = switch (@import("builtin").os.tag) {
+    .windows => 260,
+    .linux => 4096,
+    .macos => 1024,
+    else => @compileError("unsupported os"),
+};
 
 pub fn main() !void {
     const arg_ctx = arg.parse();
