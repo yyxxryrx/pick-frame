@@ -128,10 +128,6 @@ zig build -Denable-time-expr=true --release=fast
 - `0[.0]s`: 秒数
 - `[0:]0:0[.0]`: 时间
 
-特殊部分：
-
-- `0.0`: 等价于 `0.0s`
-
 支持两种运算符：
 
 - `+`: 加
